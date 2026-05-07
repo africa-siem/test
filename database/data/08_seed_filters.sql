@@ -76,4 +76,28 @@ INSERT INTO alert_filters (
     5724,
     NULL,
     'DOWNGRADE', 'INFO',
+    'SYSTEM', 1),
+
+-- ============================================================================
+-- Filtre 7 : Ignorer les sudo command executed (très bruyant)
+-- ============================================================================
+-- Quand un admin fait "sudo apt update", "sudo systemctl status", etc.
+-- on ne veut PAS d'alerte. Les vraies menaces sudo sont dans 5104, 5105, 5404, 5405.
+(lower(hex(randomblob(16))),
+    'Sudo command executed (admin normal)',
+    'Ignore les commandes sudo normales d''admin. Les vraies menaces (sudoers modifié, ajout au groupe sudo, échec sudo) restent en alerte.',
+    5402,
+    NULL,
+    'IGNORE', NULL,
+    'SYSTEM', 1),
+
+-- ============================================================================
+-- Filtre 8 : Sudo privileged command - notification seulement
+-- ============================================================================
+(lower(hex(randomblob(16))),
+    'Sudo privileged command',
+    'Notifier les commandes sudo privilégiées sans bloquer (pour traçabilité)',
+    5401,
+    NULL,
+    'NOTIFY_ONLY', NULL,
     'SYSTEM', 1);
