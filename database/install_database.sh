@@ -149,12 +149,11 @@ log_step "Installation des dépendances"
 
 apt-get update -qq
 
-# sqlite3, argon2, msmtp et mailutils
+# sqlite3, argon2 et python3 (pour SMTP via smtplib)
 PACKAGES_NEEDED=()
 command -v sqlite3 >/dev/null 2>&1 || PACKAGES_NEEDED+=("sqlite3")
 command -v argon2 >/dev/null 2>&1   || PACKAGES_NEEDED+=("argon2")
-command -v msmtp >/dev/null 2>&1    || PACKAGES_NEEDED+=("msmtp" "msmtp-mta")
-command -v mail >/dev/null 2>&1     || PACKAGES_NEEDED+=("mailutils")
+command -v python3 >/dev/null 2>&1  || PACKAGES_NEEDED+=("python3")
 dpkg -s ca-certificates >/dev/null 2>&1 || PACKAGES_NEEDED+=("ca-certificates")
 
 if [ ${#PACKAGES_NEEDED[@]} -gt 0 ]; then
@@ -168,8 +167,8 @@ fi
 
 log_ok "sqlite3 : $(sqlite3 --version | awk '{print $1}')"
 log_ok "argon2  : disponible"
-log_ok "msmtp   : $(msmtp --version 2>/dev/null | head -1 | awk '{print $2}' || echo 'disponible')"
-log_ok "mail    : disponible"
+log_ok "python3 : $(python3 --version | awk '{print $2}')"
+log_ok "smtplib : intégré à Python (utilisé par configure_smtp.sh)"
 
 # ----------------------------------------------------------------------------
 # Création groupe et utilisateur système
@@ -221,45 +220,10 @@ chown "root:${SIEM_GROUP}" "$CONFIG_DIR"
 chmod 750 "$CONFIG_DIR"
 log_ok "$CONFIG_DIR (750 root:${SIEM_GROUP})"
 
-# Template msmtp (sera rempli par configure_smtp.sh)
-MSMTP_CONF="${CONFIG_DIR}/msmtp.conf"
-if [ ! -f "$MSMTP_CONF" ]; then
-    cat > "$MSMTP_CONF" <<'EOF'
-# ============================================================================
-# SIEM AFRICA - Configuration msmtp (relais SMTP)
-# ============================================================================
-# Ce fichier sera rempli par : sudo ./configure_smtp.sh
-# Pour configurer manuellement, voir : man msmtp
-# ============================================================================
-
-# Defaults pour tous les comptes
-defaults
-auth           on
-tls            on
-tls_starttls   on
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-logfile        /var/log/siem-africa/msmtp.log
-timeout        30
-
-# Compte par défaut (à compléter avec configure_smtp.sh)
-# account siem-africa
-# host smtp.gmail.com
-# port 587
-# from monitoring@example.com
-# user monitoring@example.com
-# password [VOTRE_APP_PASSWORD]
-
-# account default : siem-africa
-EOF
-    chmod 640 "$MSMTP_CONF"
-    chown "root:${SIEM_GROUP}" "$MSMTP_CONF"
-    log_ok "Template msmtp.conf créé (à configurer avec configure_smtp.sh)"
-fi
-
-# Fichier log msmtp (vide au départ)
-touch /var/log/siem-africa/msmtp.log
-chown "root:${SIEM_GROUP}" /var/log/siem-africa/msmtp.log
-chmod 660 /var/log/siem-africa/msmtp.log
+# Fichier log SIEM (vide au départ)
+touch /var/log/siem-africa/siem.log
+chown "${SIEM_DB_USER}:${SIEM_GROUP}" /var/log/siem-africa/siem.log
+chmod 660 /var/log/siem-africa/siem.log
 
 # ----------------------------------------------------------------------------
 # Prompts interactifs
@@ -514,6 +478,41 @@ echo "  Pays             : $N_COUNTRIES / 4"
 echo "  Utilisateurs     : $N_USERS"
 echo "  FK errors        : $FK_ERRORS"
 
+# ----------------------------------------------------------------------------
+# Configuration SMTP optionnelle (utilise configure_smtp.sh)
+# ----------------------------------------------------------------------------
+log_step "Configuration SMTP (optionnelle)"
+
+echo ""
+echo "Voulez-vous configurer SMTP maintenant ?"
+echo "Cela permettra :"
+echo "  - Recevoir un email de bienvenue (test SMTP)"
+echo "  - Préparer les notifications d'alertes du Module 3"
+echo ""
+echo "  1. Oui, configurer maintenant (recommandé)"
+echo "  2. Plus tard (lancer ./configure_smtp.sh quand vous voudrez)"
+echo ""
+read -p "Choix [1/2, défaut 2] : " SMTP_CHOICE
+SMTP_CHOICE="${SMTP_CHOICE:-2}"
+
+SMTP_CONFIGURED=0
+
+if [ "$SMTP_CHOICE" = "1" ]; then
+    SCRIPT_DIR_SMTP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -x "$SCRIPT_DIR_SMTP/configure_smtp.sh" ]; then
+        log_info "Lancement de configure_smtp.sh..."
+        echo ""
+        if "$SCRIPT_DIR_SMTP/configure_smtp.sh"; then
+            SMTP_CONFIGURED=1
+        fi
+    else
+        log_warn "configure_smtp.sh introuvable"
+        log_info "Vous pourrez le lancer plus tard : sudo ./configure_smtp.sh"
+    fi
+else
+    log_info "SMTP non configuré (vous pourrez le faire avec ./configure_smtp.sh)"
+fi
+
 # Résumé final
 echo ""
 log_step "Installation terminée"
@@ -526,11 +525,21 @@ echo "  📂 Base de données : $DB_PATH"
 echo "  👤 Admin           : $ADMIN_EMAIL"
 echo "  🌍 Pays            : $COUNTRY_NAME"
 echo "  🔐 Credentials     : $CREDS_FILE"
-echo "  📧 SMTP            : msmtp installé (à configurer avec ./configure_smtp.sh)"
+if [ "$SMTP_CONFIGURED" = "1" ]; then
+    echo "  📧 SMTP            : ✅ configuré et email de bienvenue envoyé"
+else
+    echo "  📧 SMTP            : ⚠ non configuré (lancer ./configure_smtp.sh)"
+fi
 echo ""
 echo "Prochaines étapes :"
-echo "  1. Configurer SMTP        : sudo ./configure_smtp.sh"
-echo "  2. Lancer la vérification : sudo ./verify.sh"
-echo "  3. Lancer les tests       : sudo ./tests/run_all_tests.sh"
-echo "  4. Installer le Module 3 (Agent)"
+if [ "$SMTP_CONFIGURED" != "1" ]; then
+    echo "  1. Configurer SMTP        : sudo ./configure_smtp.sh"
+    echo "  2. Lancer la vérification : sudo ./verify.sh"
+    echo "  3. Lancer les tests       : sudo ./tests/run_all_tests.sh"
+    echo "  4. Installer le Module 3 (Agent)"
+else
+    echo "  1. Lancer la vérification : sudo ./verify.sh"
+    echo "  2. Lancer les tests       : sudo ./tests/run_all_tests.sh"
+    echo "  3. Installer le Module 3 (Agent)"
+fi
 echo ""

@@ -224,7 +224,7 @@ if [ -f "$DB_PATH" ]; then
     check_count "mitre_techniques"       "137" "MITRE Techniques"
     check_count "signature_categories"   "10"  "Catégories"
     check_count "roles"                  "4"   "Rôles RBAC"
-    check_count "alert_filters"          "6"   "Filtres FP"
+    check_count "alert_filters"          "8"   "Filtres FP"
     check_count "countries"              "4"   "Pays Afrique Centrale"
 
     N_SIGS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM signatures")
