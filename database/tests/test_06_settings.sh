@@ -77,7 +77,7 @@ echo ""
 echo "  Filtres FP :"
 
 N_FILT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM alert_filters WHERE is_active=1")
-t "6 filtres FP actifs" "6" "$N_FILT"
+t "8 filtres FP actifs" "8" "$N_FILT"
 
 # Catégories de settings
 echo ""

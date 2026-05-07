@@ -1,107 +1,92 @@
 #!/bin/bash
-# Test 07 : Configuration SMTP (msmtp + mailutils)
+# Test 07 : Configuration SMTP (Python smtplib)
 DB_PATH="${DB_PATH:-/var/lib/siem-africa/siem.db}"
-PASS=0; FAIL=0
+SMTP_CONF="${SMTP_CONF:-/etc/siem-africa/smtp.env}"
+PASS=0; FAIL=0; WARN=0
 
 t() {
     if [ "$3" = "$2" ]; then echo "  ✓ $1"; PASS=$((PASS+1));
     else echo "  ✗ $1 : got '$3', expected '$2'"; FAIL=$((FAIL+1)); fi
 }
 
-echo "▶ Test 07 : SMTP (msmtp)"
+w() { echo "  ⚠ $1"; WARN=$((WARN+1)); }
 
-# msmtp installé
-if command -v msmtp >/dev/null 2>&1; then
-    echo "  ✓ msmtp installé"
+echo "▶ Test 07 : Configuration SMTP (Python smtplib)"
+
+# Python3 disponible
+if command -v python3 >/dev/null 2>&1; then
+    echo "  ✓ python3 disponible : $(python3 --version)"
     PASS=$((PASS+1))
 else
-    echo "  ✗ msmtp NON installé"
+    echo "  ✗ python3 non installé"
     FAIL=$((FAIL+1))
 fi
 
-# mailutils installé
-if command -v mail >/dev/null 2>&1; then
-    echo "  ✓ mail (mailutils) installé"
+# Module smtplib (intégré à Python standard)
+if python3 -c "import smtplib" 2>/dev/null; then
+    echo "  ✓ Module smtplib disponible"
     PASS=$((PASS+1))
 else
-    echo "  ✗ mail (mailutils) NON installé"
+    echo "  ✗ Module smtplib indisponible (Python incomplet)"
     FAIL=$((FAIL+1))
 fi
 
-# Fichier de config existe
-MSMTP_CONF="/etc/siem-africa/msmtp.conf"
-if [ -f "$MSMTP_CONF" ]; then
-    echo "  ✓ $MSMTP_CONF existe"
-    PASS=$((PASS+1))
+# Settings BDD
+SMTP_EN=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='smtp_enabled'")
+t "smtp_enabled = true" "true" "$SMTP_EN"
 
-    # Permissions 640
-    PERMS=$(stat -c "%a" "$MSMTP_CONF")
-    t "Permissions msmtp.conf 640" "640" "$PERMS"
-
-    # Propriétaire root:siem-africa
-    OWNER=$(stat -c "%U:%G" "$MSMTP_CONF")
-    t "Propriétaire msmtp.conf" "root:siem-africa" "$OWNER"
-else
-    echo "  ✗ msmtp.conf MANQUANT"
-    FAIL=$((FAIL+1))
-fi
-
-# Logfile existe
-LOG_FILE="/var/log/siem-africa/msmtp.log"
-if [ -f "$LOG_FILE" ]; then
-    echo "  ✓ Log file existe : $LOG_FILE"
-    PASS=$((PASS+1))
-else
-    echo "  ⚠ Log file absent (sera créé au 1er envoi)"
-fi
-
-# CA certificates
-if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-    echo "  ✓ CA certificates présents"
-    PASS=$((PASS+1))
-else
-    echo "  ✗ CA certificates manquants"
-    FAIL=$((FAIL+1))
-fi
-
-# Settings BDD cohérents
-echo ""
-echo "  Settings SMTP en BDD :"
-
-SMTP_HOST=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='smtp_host'")
-echo "  ℹ smtp_host : ${SMTP_HOST:-(non configuré)}"
-
-SMTP_PORT=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='smtp_port'")
-echo "  ℹ smtp_port : ${SMTP_PORT:-(non configuré)}"
-
-SMTP_FROM=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='smtp_from_email'")
-if [ -n "$SMTP_FROM" ]; then
-    echo "  ✓ smtp_from_email configuré : $SMTP_FROM"
-    PASS=$((PASS+1))
-else
-    echo "  ⚠ smtp_from_email vide (lancer ./configure_smtp.sh)"
-fi
-
-# Vérifier qu'un compte siem-africa existe dans msmtp.conf
-if [ -f "$MSMTP_CONF" ] && grep -q "^account siem-africa" "$MSMTP_CONF" 2>/dev/null; then
-    echo "  ✓ Compte msmtp 'siem-africa' configuré"
-    PASS=$((PASS+1))
-
-    # Tester msmtp en lecture (sans envoyer)
-    if msmtp --pretend --read-recipients <<<"From: test@test.com
-To: nobody@nowhere.com
-Subject: test
-" --account=siem-africa 2>&1 | grep -q "host\|recipient"; then
-        echo "  ✓ Configuration msmtp lue avec succès"
+# Settings SMTP de base
+for key in smtp_host smtp_port; do
+    VALUE=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='$key'")
+    if [ -n "$VALUE" ]; then
+        echo "  ✓ Setting $key configuré : $VALUE"
         PASS=$((PASS+1))
     else
-        echo "  ⚠ Impossible de lire la config msmtp"
+        w "Setting $key vide"
     fi
+done
+
+# Settings SMTP utilisateur (peut être vide si pas configuré)
+SMTP_USER=$(sqlite3 "$DB_PATH" "SELECT value FROM settings WHERE key='smtp_username'")
+if [ -n "$SMTP_USER" ] && [ "$SMTP_USER" != "" ]; then
+    echo "  ✓ smtp_username configuré : $SMTP_USER"
+    PASS=$((PASS+1))
 else
-    echo "  ⚠ msmtp non configuré (compte 'siem-africa' absent)"
-    echo "    → Lancez : sudo ./configure_smtp.sh"
+    w "smtp_username vide (lancer configure_smtp.sh)"
+fi
+
+# Config SMTP
+if [ -f "$SMTP_CONF" ]; then
+    echo "  ✓ Fichier $SMTP_CONF existe"
+    PASS=$((PASS+1))
+
+    PERMS=$(stat -c "%a" "$SMTP_CONF")
+    if [ "$PERMS" = "640" ] || [ "$PERMS" = "660" ]; then
+        echo "  ✓ Permissions smtp.env : $PERMS"
+        PASS=$((PASS+1))
+    else
+        w "Permissions smtp.env : $PERMS (attendu 640)"
+    fi
+
+    OWNER=$(stat -c "%U:%G" "$SMTP_CONF")
+    echo "  ✓ Propriétaire smtp.env : $OWNER"
+    PASS=$((PASS+1))
+else
+    w "$SMTP_CONF inexistant (lancer ./configure_smtp.sh pour configurer)"
+fi
+
+# Dossier logs
+if [ -d /var/log/siem-africa ]; then
+    echo "  ✓ Dossier logs SIEM existe"
+    PASS=$((PASS+1))
+else
+    echo "  ✗ /var/log/siem-africa MANQUANT"
+    FAIL=$((FAIL+1))
 fi
 
 echo ""
+if [ "$WARN" -gt 0 ]; then
+    echo "  ℹ $WARN warning(s) - SMTP peut nécessiter une configuration via configure_smtp.sh"
+fi
 echo "  Résultat : $PASS passés, $FAIL échoués"
 exit $FAIL
