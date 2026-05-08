@@ -536,7 +536,7 @@ fi
 # ----------------------------------------------------------------------------
 # Tests automatiques (run_all_tests.sh)
 # ----------------------------------------------------------------------------
-log_step "Tests automatiques (67 assertions)"
+log_step "Tests automatiques (98 assertions)"
 
 TESTS_OK=0
 TESTS_RESULT=""
@@ -578,7 +578,7 @@ else
     echo "  🔍 Vérification    : ⚠ problèmes détectés"
 fi
 if [ "$TESTS_OK" = "1" ]; then
-    echo "  🧪 Tests           : ✅ 67/67 assertions OK"
+    echo "  🧪 Tests           : ✅ 98/98 assertions OK"
 else
     echo "  🧪 Tests           : ⚠ voir résultats ci-dessus"
 fi
