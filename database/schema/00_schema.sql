@@ -177,13 +177,23 @@ CREATE TABLE alerts (
     enriched_data       TEXT,                       -- JSON : MITRE, geoloc, stats
     tags                TEXT,                       -- JSON array
     metadata            TEXT,                       -- JSON
+    -- Enrichissement IA (signatures non répertoriées)
+    ai_status           TEXT    NOT NULL DEFAULT 'not_required'
+                                CHECK(ai_status IN ('not_required','pending','cached','fresh','failed','disabled')),
+    ai_description      TEXT,                       -- Description générée par IA
+    ai_remediation      TEXT,                       -- Recommandations IA (JSON array)
+    ai_severity         TEXT,                       -- Sévérité estimée par IA
+    ai_model_used       TEXT,                       -- 'qwen2.5:3b' ou 'llama3.2:3b'
+    ai_processed_at     TEXT,                       -- Quand l'IA a répondu
+    ai_cache_id         INTEGER,                    -- FK vers ai_signature_cache
     -- Timestamps
     created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (signature_id)  REFERENCES signatures(id)  ON DELETE RESTRICT,
     FOREIGN KEY (asset_id)      REFERENCES assets(id)      ON DELETE SET NULL,
     FOREIGN KEY (incident_id)   REFERENCES incidents(id)   ON DELETE SET NULL,
-    FOREIGN KEY (assigned_to)   REFERENCES users(id)       ON DELETE SET NULL
+    FOREIGN KEY (assigned_to)   REFERENCES users(id)       ON DELETE SET NULL,
+    FOREIGN KEY (ai_cache_id)   REFERENCES ai_signature_cache(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_alerts_uuid          ON alerts(alert_uuid);
@@ -196,6 +206,8 @@ CREATE INDEX idx_alerts_created_at    ON alerts(created_at DESC);
 CREATE INDEX idx_alerts_assigned      ON alerts(assigned_to);
 CREATE INDEX idx_alerts_incident      ON alerts(incident_id);
 CREATE INDEX idx_alerts_event_count   ON alerts(event_count);
+CREATE INDEX idx_alerts_ai_status     ON alerts(ai_status);
+CREATE INDEX idx_alerts_ai_cache      ON alerts(ai_cache_id);
 
 
 -- ----------------------------------------------------------------------------
@@ -507,7 +519,7 @@ CREATE TABLE users (
     -- Préférences
     language            TEXT    NOT NULL DEFAULT 'fr' CHECK(language IN ('fr','en')),
     timezone            TEXT    NOT NULL DEFAULT 'Africa/Douala',
-    theme_preference    TEXT    NOT NULL DEFAULT 'dark' CHECK(theme_preference IN ('dark','light','auto')),
+    theme_preference    TEXT    NOT NULL DEFAULT 'light' CHECK(theme_preference IN ('dark','light','auto')),
     -- Tracking
     last_login_at       TEXT,
     last_login_ip       TEXT,
@@ -767,6 +779,62 @@ CREATE INDEX idx_kpi_date_metric ON kpi_history(snapshot_date, metric_name);
 
 
 -- ============================================================================
+-- ENRICHISSEMENT IA - Cache des analyses pour signatures non répertoriées
+-- ============================================================================
+--
+-- Quand une alerte arrive avec un rule_id (Wazuh) ou SID (Snort) qui n'est
+-- PAS dans la table signatures, l'agent envoie l'alerte à Ollama pour
+-- enrichissement (description + remédiation). Le résultat est mis en cache
+-- ici pour éviter de re-payer le coût IA pour la même signature.
+--
+-- Workflow :
+--  1. Agent reçoit alerte → cherche dans signatures
+--  2. Pas trouvée → calcule signature_hash (SHA256 source+rule_id+raw_message)
+--  3. Cherche dans ai_signature_cache via signature_hash
+--  4. Trouvée → réutilise (used_count++)
+--  5. Pas trouvée → appelle Ollama → sauvegarde ici → utilise
+--
+-- ============================================================================
+CREATE TABLE ai_signature_cache (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature_hash      TEXT    NOT NULL UNIQUE,        -- SHA256 unique
+    source              TEXT    NOT NULL CHECK(source IN ('wazuh','snort','agent')),
+    rule_id             TEXT    NOT NULL,               -- ex: '5710' ou '1000999'
+    raw_message         TEXT,                           -- Message brut original
+    -- Réponse IA
+    ai_description      TEXT    NOT NULL,               -- Description en français
+    ai_remediation      TEXT    NOT NULL,               -- JSON array de recommandations
+    ai_severity         TEXT    NOT NULL
+                                CHECK(ai_severity IN ('INFO','LOW','MEDIUM','HIGH','CRITICAL')),
+    ai_mitre_tactic     TEXT,                           -- Si l'IA a déduit un MITRE
+    ai_mitre_technique  TEXT,                           -- Idem
+    -- Métadonnées du modèle
+    model_used          TEXT    NOT NULL,               -- 'qwen2.5:3b' / 'llama3.2:3b'
+    prompt_version      TEXT    NOT NULL DEFAULT 'v1',  -- Pour invalider si on change le prompt
+    response_time_ms    INTEGER,                        -- Latence Ollama
+    -- Validation humaine (apprentissage progressif)
+    is_validated        INTEGER NOT NULL DEFAULT 0 CHECK(is_validated IN (0,1)),
+    validated_by        INTEGER,                        -- user_id
+    validated_at        TEXT,
+    -- Statistiques d'usage
+    used_count          INTEGER NOT NULL DEFAULT 1,
+    last_used_at        TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Timestamps
+    created_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (validated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_aicache_hash      ON ai_signature_cache(signature_hash);
+CREATE INDEX idx_aicache_source    ON ai_signature_cache(source);
+CREATE INDEX idx_aicache_ruleid    ON ai_signature_cache(rule_id);
+CREATE INDEX idx_aicache_model     ON ai_signature_cache(model_used);
+CREATE INDEX idx_aicache_validated ON ai_signature_cache(is_validated);
+CREATE INDEX idx_aicache_used      ON ai_signature_cache(used_count DESC);
+CREATE INDEX idx_aicache_lastused  ON ai_signature_cache(last_used_at DESC);
+
+
+-- ============================================================================
 -- TRIGGERS (logique métier automatique)
 -- ============================================================================
 
@@ -800,6 +868,26 @@ AFTER UPDATE ON settings
 FOR EACH ROW
 BEGIN
     UPDATE settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Mettre à jour updated_at sur ai_signature_cache
+CREATE TRIGGER trg_aicache_updated_at
+AFTER UPDATE ON ai_signature_cache
+FOR EACH ROW
+BEGIN
+    UPDATE ai_signature_cache SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Incrémenter used_count + last_used_at automatiquement quand le cache est lié à une alerte
+CREATE TRIGGER trg_aicache_increment_usage
+AFTER UPDATE OF ai_cache_id ON alerts
+FOR EACH ROW
+WHEN NEW.ai_cache_id IS NOT NULL AND (OLD.ai_cache_id IS NULL OR OLD.ai_cache_id != NEW.ai_cache_id)
+BEGIN
+    UPDATE ai_signature_cache
+    SET used_count    = used_count + 1,
+        last_used_at  = CURRENT_TIMESTAMP
+    WHERE id = NEW.ai_cache_id;
 END;
 
 -- 5. APPRENTISSAGE : faux positif → confidence -5 sur la signature
