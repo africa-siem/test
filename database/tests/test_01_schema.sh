@@ -18,7 +18,7 @@ echo "▶ Test 01 : Schéma BDD"
 
 # Tables
 N=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-t "24 tables présentes" "24" "$N"
+t "25 tables présentes" "25" "$N"
 
 # Tables critiques
 for tbl in alerts signatures users roles settings countries kpi_history audit_log; do
@@ -32,7 +32,7 @@ t "Au moins 4 vues" "4" "$N"
 
 # Triggers
 N=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'")
-t "9 triggers" "9" "$N"
+t "11 triggers" "11" "$N"
 
 # WAL
 J=$(sqlite3 "$DB_PATH" "PRAGMA journal_mode")
