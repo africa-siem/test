@@ -1,7 +1,7 @@
 #!/bin/bash
 #===============================================================================
 #
-#          FILE: install_module1.sh
+#          FILE: install.sh
 #
 #   DESCRIPTION: SIEM Africa - Module 1 - Menu de choix LITE/FULL
 #
@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}✗ Ce script doit être exécuté avec sudo.${NC}"
     echo ""
-    echo "   Relancez : sudo ./install_module1.sh"
+    echo "   Relancez : sudo ./install.sh"
     exit 1
 fi
 
@@ -126,11 +126,11 @@ echo ""
 
 case "$MODE_CHOICE" in
     1|lite|LITE)
-        TARGET_SCRIPT="${SCRIPT_DIR}/install_module1_lite.sh"
+        TARGET_SCRIPT="${SCRIPT_DIR}/install_lite.sh"
         MODE_NAME="LITE"
         ;;
     2|full|FULL)
-        TARGET_SCRIPT="${SCRIPT_DIR}/install_module1_full.sh"
+        TARGET_SCRIPT="${SCRIPT_DIR}/install_full.sh"
         MODE_NAME="FULL"
         ;;
     *)
