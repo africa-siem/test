@@ -140,9 +140,12 @@ echo -e "  Il est different de votre mot de passe Gmail normal !"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
+echo -e "${YELLOW}  ℹ Le mot de passe sera VISIBLE pendant la saisie (pour eviter les fautes).${NC}"
+echo -e "${YELLOW}    Il sera ensuite stocke dans /etc/siem-africa/smtp.env (640 root:siem-africa).${NC}"
+echo ""
+
 while true; do
-    read -s -p "  Mot de passe application (16 caracteres) : " SMTP_PASS
-    echo ""
+    read -p "  Mot de passe application (16 caracteres) : " SMTP_PASS
     # Retirer les espaces (Google affiche avec des espaces)
     SMTP_PASS=$(echo "$SMTP_PASS" | tr -d ' ')
     if [ ${#SMTP_PASS} -ge 8 ]; then

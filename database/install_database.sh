@@ -249,15 +249,17 @@ read -p "Prénom : " ADMIN_FIRSTNAME
 read -p "Nom : " ADMIN_LASTNAME
 
 # Mot de passe (avec confirmation)
+echo ""
+echo -e "${YELLOW}ℹ Le mot de passe sera VISIBLE pendant la saisie (pour eviter les fautes de frappe).${NC}"
+echo -e "${YELLOW}  Il sera ensuite chiffre avec argon2id avant stockage en BDD.${NC}"
+echo ""
 while true; do
-    read -s -p "Mot de passe (min 8 caractères) : " ADMIN_PASSWORD
-    echo ""
+    read -p "Mot de passe (min 8 caractères) : " ADMIN_PASSWORD
     if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
         log_warn "Trop court (min 8 caractères)"
         continue
     fi
-    read -s -p "Confirmer le mot de passe : " ADMIN_PASSWORD_CONFIRM
-    echo ""
+    read -p "Confirmer le mot de passe : " ADMIN_PASSWORD_CONFIRM
     if [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD_CONFIRM" ]; then
         break
     else
@@ -497,12 +499,13 @@ SMTP_CHOICE="${SMTP_CHOICE:-2}"
 
 SMTP_CONFIGURED=0
 
+SCRIPT_DIR_AUTO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ "$SMTP_CHOICE" = "1" ]; then
-    SCRIPT_DIR_SMTP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -x "$SCRIPT_DIR_SMTP/configure_smtp.sh" ]; then
+    if [ -x "$SCRIPT_DIR_AUTO/configure_smtp.sh" ]; then
         log_info "Lancement de configure_smtp.sh..."
         echo ""
-        if "$SCRIPT_DIR_SMTP/configure_smtp.sh"; then
+        if "$SCRIPT_DIR_AUTO/configure_smtp.sh"; then
             SMTP_CONFIGURED=1
         fi
     else
@@ -511,6 +514,45 @@ if [ "$SMTP_CHOICE" = "1" ]; then
     fi
 else
     log_info "SMTP non configuré (vous pourrez le faire avec ./configure_smtp.sh)"
+fi
+
+# ----------------------------------------------------------------------------
+# Vérification automatique (verify.sh)
+# ----------------------------------------------------------------------------
+log_step "Vérification automatique de l'installation"
+
+VERIFY_OK=0
+if [ -x "$SCRIPT_DIR_AUTO/verify.sh" ]; then
+    if "$SCRIPT_DIR_AUTO/verify.sh"; then
+        VERIFY_OK=1
+        log_ok "Vérification réussie"
+    else
+        log_warn "La vérification a relevé des problèmes (voir au-dessus)"
+    fi
+else
+    log_warn "verify.sh introuvable, vérification ignorée"
+fi
+
+# ----------------------------------------------------------------------------
+# Tests automatiques (run_all_tests.sh)
+# ----------------------------------------------------------------------------
+log_step "Tests automatiques (67 assertions)"
+
+TESTS_OK=0
+TESTS_RESULT=""
+if [ -x "$SCRIPT_DIR_AUTO/tests/run_all_tests.sh" ]; then
+    echo ""
+    if "$SCRIPT_DIR_AUTO/tests/run_all_tests.sh"; then
+        TESTS_OK=1
+        TESTS_RESULT="✅ TOUS LES TESTS PASSENT"
+        log_ok "Tous les tests passent"
+    else
+        TESTS_RESULT="⚠ CERTAINS TESTS ONT ÉCHOUÉ (voir au-dessus)"
+        log_warn "Certains tests ont échoué"
+    fi
+else
+    TESTS_RESULT="⚠ Tests non lancés (run_all_tests.sh introuvable)"
+    log_warn "tests/run_all_tests.sh introuvable, tests ignorés"
 fi
 
 # Résumé final
@@ -530,16 +572,22 @@ if [ "$SMTP_CONFIGURED" = "1" ]; then
 else
     echo "  📧 SMTP            : ⚠ non configuré (lancer ./configure_smtp.sh)"
 fi
+if [ "$VERIFY_OK" = "1" ]; then
+    echo "  🔍 Vérification    : ✅ OK"
+else
+    echo "  🔍 Vérification    : ⚠ problèmes détectés"
+fi
+if [ "$TESTS_OK" = "1" ]; then
+    echo "  🧪 Tests           : ✅ 67/67 assertions OK"
+else
+    echo "  🧪 Tests           : ⚠ voir résultats ci-dessus"
+fi
 echo ""
 echo "Prochaines étapes :"
 if [ "$SMTP_CONFIGURED" != "1" ]; then
-    echo "  1. Configurer SMTP        : sudo ./configure_smtp.sh"
-    echo "  2. Lancer la vérification : sudo ./verify.sh"
-    echo "  3. Lancer les tests       : sudo ./tests/run_all_tests.sh"
-    echo "  4. Installer le Module 3 (Agent)"
+    echo "  1. (Optionnel) Configurer SMTP : sudo ./configure_smtp.sh"
+    echo "  2. Installer le Module 3 (Agent)"
 else
-    echo "  1. Lancer la vérification : sudo ./verify.sh"
-    echo "  2. Lancer les tests       : sudo ./tests/run_all_tests.sh"
-    echo "  3. Installer le Module 3 (Agent)"
+    echo "  1. Installer le Module 3 (Agent)"
 fi
 echo ""
