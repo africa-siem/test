@@ -57,7 +57,7 @@ INSERT INTO settings (key, value, value_type, enum_values, category, description
     'ai', 'Modèles IA disponibles (séparés par virgule). Doivent être pull via "ollama pull <nom>"', 0, 1),
 
 -- ⭐ NOUVEAU : Modèle par défaut (sélectionnable)
-('ai_default_model', 'llama3.2:3b', 'text', NULL,
+('ai_default_model', 'qwen2.5:3b', 'text', NULL,
     'ai', 'Modèle utilisé par défaut pour les explications', 0, 1),
 
 ('ai_temperature', '0.3', 'text', NULL,
@@ -78,11 +78,31 @@ INSERT INTO settings (key, value, value_type, enum_values, category, description
 ('ai_cache_ttl_hours', '168', 'int', NULL,
     'ai', 'Durée de vie du cache IA en heures (168 = 7 jours)', 0, 1),
 
+-- ⭐ NOUVEAU : Mode async pour ne pas bloquer l'agent pendant l'appel Ollama
+('ai_async_enabled', 'true', 'bool', NULL,
+    'ai', 'Mode asynchrone : alerte affichée de suite, IA en background', 0, 1),
+
+-- ⭐ NOUVEAU : Enrichissement des signatures inconnues (la grosse feature)
+('ai_enrich_unknown', 'true', 'bool', NULL,
+    'ai', 'Envoyer à l''IA les alertes dont la signature n''est pas en BDD', 0, 1),
+
+-- ⭐ NOUVEAU : Auto-promouvoir les analyses IA validées en signatures
+('ai_auto_promote_validated', 'false', 'bool', NULL,
+    'ai', 'Promouvoir automatiquement les analyses IA validées par admin en vraies signatures', 0, 1),
+
+-- ⭐ NOUVEAU : Healthcheck Ollama au démarrage agent
+('ai_healthcheck_on_boot', 'true', 'bool', NULL,
+    'ai', 'Vérifier qu''Ollama répond au démarrage de l''agent', 0, 1),
+
+-- ⭐ NOUVEAU : Version du prompt (pour invalider le cache si on change)
+('ai_prompt_version', 'v1', 'text', NULL,
+    'ai', 'Version actuelle du prompt système (changer = invalider le cache)', 0, 1),
+
 -- ============================================================================
 -- 🎨 UI - Interface utilisateur (toggle dark/light ⭐)
 -- ============================================================================
 -- ⭐ NOUVEAU : Thème par défaut
-('theme_default', 'dark', 'enum', '["dark","light","auto"]',
+('theme_default', 'light', 'enum', '["dark","light","auto"]',
     'ui', 'Thème par défaut du dashboard', 0, 1),
 
 -- ⭐ NOUVEAU : Autoriser le toggle utilisateur
@@ -91,6 +111,10 @@ INSERT INTO settings (key, value, value_type, enum_values, category, description
 
 ('default_language', 'fr', 'enum', '["fr","en"]',
     'ui', 'Langue par défaut du dashboard', 0, 1),
+
+-- ⭐ NOUVEAU : Autoriser le toggle de langue
+('allow_language_toggle', 'true', 'bool', NULL,
+    'ui', 'Autoriser les utilisateurs à changer la langue', 0, 1),
 
 ('default_timezone', 'Africa/Douala', 'text', NULL,
     'ui', 'Fuseau horaire par défaut', 0, 1),
