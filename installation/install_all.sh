@@ -5,7 +5,7 @@
 #
 #   DESCRIPTION: SIEM Africa - Module 1 - Menu de choix LITE/FULL
 #
-#         USAGE: sudo ./install_module1.sh
+#         USAGE: sudo ./install.sh
 #
 #   Ce script propose un choix interactif entre :
 #     - LITE : Snort + Wazuh Manager (4 Go RAM, pas de Dashboard)
@@ -126,11 +126,11 @@ echo ""
 
 case "$MODE_CHOICE" in
     1|lite|LITE)
-        TARGET_SCRIPT="${SCRIPT_DIR}/install_module1_lite.sh"
+        TARGET_SCRIPT="${SCRIPT_DIR}/install_lite.sh"
         MODE_NAME="LITE"
         ;;
     2|full|FULL)
-        TARGET_SCRIPT="${SCRIPT_DIR}/install_module1_full.sh"
+        TARGET_SCRIPT="${SCRIPT_DIR}/install_full.sh"
         MODE_NAME="FULL"
         ;;
     *)
