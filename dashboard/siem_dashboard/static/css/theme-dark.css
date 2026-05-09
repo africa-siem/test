@@ -1,0 +1,160 @@
+/* ============================================================================
+   SIEM AFRICA - Theme DARK (style Wazuh)
+   ============================================================================ */
+
+body.theme-dark {
+    --sa-bg: #0d1117;
+    --sa-card-bg: #161b22;
+    --sa-card-header: #1c2128;
+    --sa-text: #e6edf3;
+    --sa-text-muted: #8b949e;
+    --sa-border: #30363d;
+    --sa-hover: rgba(255, 255, 255, 0.06);
+    --sa-active: rgba(88, 166, 255, 0.15);
+    --sa-active-text: #58a6ff;
+    --sa-navbar-bg: #161b22;
+    --sa-input-bg: #0d1117;
+    --sa-primary: #58a6ff;
+
+    background-color: var(--sa-bg);
+    color: var(--sa-text);
+}
+
+body.theme-dark a {
+    color: #58a6ff;
+}
+
+body.theme-dark .text-muted {
+    color: #8b949e !important;
+}
+
+body.theme-dark .btn-primary {
+    background-color: #1f6feb;
+    border-color: #1f6feb;
+}
+
+body.theme-dark .btn-primary:hover {
+    background-color: #388bfd;
+    border-color: #388bfd;
+}
+
+body.theme-dark .btn-outline-secondary {
+    color: #c9d1d9;
+    border-color: #30363d;
+}
+
+body.theme-dark .btn-outline-secondary:hover {
+    background-color: var(--sa-hover);
+    color: #e6edf3;
+    border-color: #58a6ff;
+}
+
+body.theme-dark .alert-info {
+    background-color: rgba(88, 166, 255, 0.1);
+    color: #79c0ff;
+    border-color: rgba(88, 166, 255, 0.3);
+}
+
+body.theme-dark .alert-success {
+    background-color: rgba(63, 185, 80, 0.1);
+    color: #56d364;
+    border-color: rgba(63, 185, 80, 0.3);
+}
+
+body.theme-dark .alert-warning {
+    background-color: rgba(210, 153, 34, 0.1);
+    color: #d29922;
+    border-color: rgba(210, 153, 34, 0.3);
+}
+
+body.theme-dark .alert-danger {
+    background-color: rgba(248, 81, 73, 0.1);
+    color: #f85149;
+    border-color: rgba(248, 81, 73, 0.3);
+}
+
+body.theme-dark pre,
+body.theme-dark code {
+    background-color: #0d1117;
+    color: #ff7b72;
+    border: 1px solid var(--sa-border);
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+body.theme-dark pre {
+    padding: 1rem;
+    overflow-x: auto;
+}
+
+body.theme-dark .table {
+    color: var(--sa-text);
+}
+
+body.theme-dark .table-hover tbody tr:hover {
+    background-color: var(--sa-hover);
+    color: var(--sa-text);
+}
+
+body.theme-dark .modal-content {
+    background-color: var(--sa-card-bg);
+    color: var(--sa-text);
+    border: 1px solid var(--sa-border);
+}
+
+body.theme-dark .modal-header,
+body.theme-dark .modal-footer {
+    border-color: var(--sa-border);
+}
+
+body.theme-dark .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+body.theme-dark .nav-tabs {
+    border-bottom-color: var(--sa-border);
+}
+
+body.theme-dark .nav-tabs .nav-link {
+    color: var(--sa-text-muted);
+}
+
+body.theme-dark .nav-tabs .nav-link:hover {
+    border-color: transparent;
+    color: var(--sa-text);
+}
+
+body.theme-dark .nav-tabs .nav-link.active {
+    background-color: var(--sa-card-bg);
+    color: var(--sa-text);
+    border-color: var(--sa-border) var(--sa-border) var(--sa-card-bg);
+}
+
+body.theme-dark .badge.bg-light {
+    background-color: var(--sa-hover) !important;
+    color: var(--sa-text) !important;
+}
+
+/* DataTables in dark mode */
+body.theme-dark .dataTables_wrapper .dataTables_paginate .paginate_button {
+    color: var(--sa-text) !important;
+}
+
+body.theme-dark .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: var(--sa-hover) !important;
+    border-color: var(--sa-border) !important;
+    color: var(--sa-text) !important;
+}
+
+body.theme-dark .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+body.theme-dark .dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+    background: #1f6feb !important;
+    border-color: #1f6feb !important;
+    color: white !important;
+}
+
+body.theme-dark .dataTables_wrapper .dataTables_info,
+body.theme-dark .dataTables_wrapper .dataTables_length,
+body.theme-dark .dataTables_wrapper .dataTables_filter {
+    color: var(--sa-text-muted);
+}

@@ -1,0 +1,44 @@
+/* ============================================================================
+   SIEM AFRICA - Theme LIGHT (defaut)
+   ============================================================================ */
+
+body.theme-light {
+    --sa-bg: #f5f7fa;
+    --sa-card-bg: #ffffff;
+    --sa-card-header: #f8f9fa;
+    --sa-text: #212529;
+    --sa-text-muted: #6c757d;
+    --sa-border: #dee2e6;
+    --sa-hover: rgba(0, 0, 0, 0.04);
+    --sa-active: rgba(13, 110, 253, 0.1);
+    --sa-active-text: #0d6efd;
+    --sa-navbar-bg: #ffffff;
+    --sa-input-bg: #ffffff;
+    --sa-primary: #0d6efd;
+
+    background-color: var(--sa-bg);
+    color: var(--sa-text);
+}
+
+/* Surcharge Bootstrap */
+body.theme-light a {
+    color: #0d6efd;
+}
+
+body.theme-light .text-muted {
+    color: #6c757d !important;
+}
+
+body.theme-light pre,
+body.theme-light code {
+    background-color: #f1f3f5;
+    color: #d6336c;
+    border: 1px solid var(--sa-border);
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+body.theme-light pre {
+    padding: 1rem;
+    overflow-x: auto;
+}
