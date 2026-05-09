@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Tableau de bord" %} - {{ DASHBOARD_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+
+    <h1 class="h3 mb-4">
+        <i class="bi bi-graph-up"></i> {% trans "Tableau de bord" %}
+    </h1>
+
+    <!-- KPI Cards principaux -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card kpi-info">
+                <div class="kpi-label">{% trans "Alertes aujourd'hui" %}</div>
+                <div class="kpi-value">{{ stats.alerts_today }}</div>
+                <div class="kpi-trend text-muted">
+                    <i class="bi bi-calendar-week"></i> {{ stats.alerts_week }} {% trans "cette semaine" %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card kpi-critical">
+                <div class="kpi-label">🔴 {% trans "Critiques aujourd'hui" %}</div>
+                <div class="kpi-value">{{ stats.alerts_critical_today }}</div>
+                <div class="kpi-trend text-muted">
+                    {% trans "+ High :" %} {{ stats.alerts_high_today }}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card kpi-success">
+                <div class="kpi-label">{% trans "Taux de resolution (7j)" %}</div>
+                <div class="kpi-value">{{ stats.resolution_rate }}%</div>
+                <div class="kpi-trend text-muted">
+                    <i class="bi bi-check-circle"></i> {{ stats.alerts_resolved_week }} {% trans "resolues" %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card kpi-warning">
+                <div class="kpi-label">{% trans "Faux positifs (7j)" %}</div>
+                <div class="kpi-value">{{ stats.false_positive_rate }}%</div>
+                <div class="kpi-trend text-muted">
+                    {{ stats.alerts_false_positive_week }} {% trans "marques FP" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI IA + Attaquants -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card">
+                <div class="kpi-label">🤖 {% trans "Cache IA" %}</div>
+                <div class="kpi-value">{{ stats.ai_cache_total }}</div>
+                <div class="kpi-trend text-muted">
+                    {% blocktrans with v=stats.ai_cache_validated %}{{ v }} validees{% endblocktrans %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card">
+                <div class="kpi-label">⚡ {% trans "Analyses IA aujourd'hui" %}</div>
+                <div class="kpi-value">{{ stats.ai_processed_today }}</div>
+                <div class="kpi-trend text-muted">
+                    {% trans "Total enrichies" %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card">
+                <div class="kpi-label">🌐 {% trans "Attaquants uniques (24h)" %}</div>
+                <div class="kpi-value">{{ stats.unique_attackers_today }}</div>
+                <div class="kpi-trend text-muted">
+                    {{ stats.unique_attackers_week }} {% trans "cette semaine" %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <div class="kpi-card">
+                <div class="kpi-label">📊 {% trans "Total mois" %}</div>
+                <div class="kpi-value">{{ stats.alerts_month }}</div>
+                <div class="kpi-trend text-muted">
+                    {% trans "30 derniers jours" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts row 1 -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-4">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Repartition par severite (24h)" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-severity"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-8">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Evolution sur 7 jours" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-timeline"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts row 2 -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Statut des alertes (7j)" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-status"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Origine des analyses (7j)" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-ai"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts row 3 -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Top 10 IP attaquantes (7j)" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-attackers"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card sa-card h-100">
+                <div class="card-header sa-card-header">
+                    {% trans "Top 10 signatures declenchees (7j)" %}
+                </div>
+                <div class="card-body">
+                    <div id="chart-signatures"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    "use strict";
+
+    // ApexCharts dark/light - on prend le theme du body
+    const isDark = document.body.classList.contains("theme-dark");
+    const textColor = isDark ? "#e6edf3" : "#212529";
+    const gridColor = isDark ? "#30363d" : "#dee2e6";
+
+    const themeOptions = {
+        chart: {
+            background: "transparent",
+            foreColor: textColor,
+        },
+        grid: { borderColor: gridColor },
+        theme: { mode: isDark ? "dark" : "light" },
+    };
+
+    // ========= Donut severity =========
+    fetch("{% url 'kpi:api_alerts_by_severity' %}")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-severity"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "donut", height: 280 }),
+                series: data.series,
+                labels: data.labels,
+                colors: data.colors,
+                legend: { position: "bottom" },
+                plotOptions: {
+                    pie: {
+                        donut: {
+                            labels: {
+                                show: true,
+                                total: { show: true, label: "Total" }
+                            }
+                        }
+                    }
+                },
+            })).render();
+        });
+
+    // ========= Timeline =========
+    fetch("{% url 'kpi:api_alerts_timeline' %}?days=7")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-timeline"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "area", height: 280, toolbar: { show: false } }),
+                series: data.series,
+                xaxis: { categories: data.categories },
+                dataLabels: { enabled: false },
+                stroke: { curve: "smooth", width: 2 },
+                colors: ["#0d6efd"],
+                fill: {
+                    type: "gradient",
+                    gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 100] }
+                },
+            })).render();
+        });
+
+    // ========= Status =========
+    fetch("{% url 'kpi:api_alerts_by_status' %}")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-status"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "donut", height: 280 }),
+                series: data.series,
+                labels: data.labels,
+                colors: data.colors,
+                legend: { position: "bottom" },
+            })).render();
+        });
+
+    // ========= AI efficiency =========
+    fetch("{% url 'kpi:api_ai_efficiency' %}")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-ai"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "donut", height: 280 }),
+                series: data.series,
+                labels: data.labels,
+                colors: data.colors,
+                legend: { position: "bottom" },
+            })).render();
+        });
+
+    // ========= Top attackers =========
+    fetch("{% url 'kpi:api_top_attackers' %}")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-attackers"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "bar", height: 320, toolbar: { show: false } }),
+                series: data.series,
+                xaxis: { categories: data.categories },
+                plotOptions: { bar: { horizontal: true, distributed: true } },
+                dataLabels: { enabled: true },
+                legend: { show: false },
+                colors: ["#dc3545", "#fd7e14", "#ffc107", "#0dcaf0", "#198754",
+                         "#6c757d", "#0d6efd", "#6610f2", "#d63384", "#20c997"],
+            })).render();
+        });
+
+    // ========= Top signatures =========
+    fetch("{% url 'kpi:api_top_signatures' %}")
+        .then(r => r.json())
+        .then(data => {
+            new ApexCharts(document.querySelector("#chart-signatures"), Object.assign({}, themeOptions, {
+                chart: Object.assign({}, themeOptions.chart, { type: "bar", height: 320, toolbar: { show: false } }),
+                series: data.series,
+                xaxis: { categories: data.categories },
+                plotOptions: { bar: { horizontal: true } },
+                dataLabels: { enabled: true },
+                colors: ["#0d6efd"],
+            })).render();
+        });
+})();
+</script>
+{% endblock %}
