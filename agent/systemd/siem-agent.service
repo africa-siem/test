@@ -1,0 +1,39 @@
+[Unit]
+Description=SIEM Africa Agent - Détection et enrichissement
+Documentation=https://github.com/africa-siem/test
+After=network-online.target ollama.service wazuh-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=siem-agent
+Group=siem-africa
+
+# Working directory
+WorkingDirectory=/opt/siem-africa-agent
+
+# Commande de démarrage (utilise le Python du venv)
+ExecStart=/opt/siem-africa-agent/venv/bin/python /opt/siem-africa-agent/main.py
+
+# Redémarrage automatique en cas de crash
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logs vers journald systemd (en plus de notre log fichier)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=siem-agent
+
+# Arrêt propre : on laisse 30s pour finir les opérations en cours
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# NOTES SECURITE :
+# Pas de ProtectSystem=strict ni PrivateTmp=yes : cause des CHDIR error 200
+# sur certaines configurations Ubuntu. On reste sur du systemd basique.
+
+[Install]
+WantedBy=multi-user.target
