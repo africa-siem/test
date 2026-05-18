@@ -62,18 +62,69 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ============================================================================
 log_step "Vérification d'une installation précédente"
 
-if systemctl is-active --quiet siem-agent 2>/dev/null; then
-    log_warn "Une installation précédente est détectée"
-    log_info "Arrêt du service en cours..."
-    systemctl stop siem-agent 2>/dev/null
-    systemctl disable siem-agent 2>/dev/null
-    log_ok "Service précédent arrêté"
-fi
+# Détecter ce qui existe déjà
+PREVIOUS_FOUND=false
+[ -d "$AGENT_DIR" ] && PREVIOUS_FOUND=true
+[ -f "/etc/systemd/system/siem-agent.service" ] && PREVIOUS_FOUND=true
+[ -f "/etc/sudoers.d/siem-agent" ] && PREVIOUS_FOUND=true
+systemctl is-active --quiet siem-agent 2>/dev/null && PREVIOUS_FOUND=true
+systemctl is-enabled --quiet siem-agent 2>/dev/null && PREVIOUS_FOUND=true
 
-if [ -d "$AGENT_DIR" ]; then
-    log_info "Suppression de l'ancienne installation $AGENT_DIR"
-    rm -rf "$AGENT_DIR"
-    log_ok "Ancienne installation supprimée"
+if [ "$PREVIOUS_FOUND" = true ]; then
+    log_warn "Installation précédente détectée"
+    log_info "Désinstallation propre en cours (la BDD M2 et ses credentials sont préservés)..."
+
+    # 1. Arrêter et désactiver le service
+    if systemctl is-active --quiet siem-agent 2>/dev/null; then
+        systemctl stop siem-agent 2>/dev/null
+        log_ok "Service arrêté"
+    fi
+    if systemctl is-enabled --quiet siem-agent 2>/dev/null; then
+        systemctl disable siem-agent 2>/dev/null
+        log_ok "Service désactivé"
+    fi
+
+    # 2. Supprimer l'unit file systemd
+    if [ -f "/etc/systemd/system/siem-agent.service" ]; then
+        rm -f /etc/systemd/system/siem-agent.service
+        log_ok "Unit systemd supprimé"
+    fi
+    systemctl daemon-reload 2>/dev/null
+    systemctl reset-failed siem-agent 2>/dev/null
+
+    # 3. Supprimer le code agent
+    if [ -d "$AGENT_DIR" ]; then
+        rm -rf "$AGENT_DIR"
+        log_ok "Code agent supprimé ($AGENT_DIR)"
+    fi
+
+    # 4. Supprimer sudoers iptables
+    if [ -f "/etc/sudoers.d/siem-agent" ]; then
+        rm -f /etc/sudoers.d/siem-agent
+        log_ok "Sudoers agent supprimé"
+    fi
+
+    # 5. Nettoyer les iptables (règles laissées par l'agent)
+    # On ne supprime pas TOUTES les règles iptables, juste celles avec commentaire siem-africa
+    if command -v iptables &>/dev/null; then
+        # Récupérer les IPs DROPed et tenter de les retirer (silencieux si rien)
+        iptables -L INPUT -n --line-numbers 2>/dev/null | grep -i "drop" | while read -r line; do
+            ip=$(echo "$line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
+            if [ -n "$ip" ]; then
+                iptables -D INPUT -s "$ip" -j DROP 2>/dev/null
+            fi
+        done 2>/dev/null
+        log_ok "Règles iptables agent nettoyées"
+    fi
+
+    # 6. PRÉSERVER : agent.env, logs, backups, BDD M2
+    # On garde ces fichiers car ils contiennent de la config / historique utile
+    log_info "Préservés : agent.env, logs, backups, BDD M2 (et ses credentials SMTP/IA)"
+
+    log_ok "Désinstallation terminée"
+    echo ""
+else
+    log_ok "Aucune installation précédente détectée"
 fi
 
 # ============================================================================
@@ -287,6 +338,111 @@ chmod 755 "$AGENT_DIR/main.py"
 log_ok "Code copié et permissions ajustées"
 
 # ============================================================================
+# 6.5 Installation Ollama + téléchargement modèles IA
+# ============================================================================
+log_step "Installation Ollama et modèles IA"
+
+# 6.5.1 Vérifier / installer Ollama
+if command -v ollama &>/dev/null; then
+    OLLAMA_VERSION=$(ollama --version 2>&1 | head -1)
+    log_ok "Ollama déjà installé : $OLLAMA_VERSION"
+else
+    log_info "Ollama non détecté, installation en cours..."
+    log_info "(téléchargement ~200 MB, peut prendre quelques minutes)"
+
+    # Installation officielle Ollama
+    if curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -5; then
+        log_ok "Ollama installé"
+    else
+        log_warn "Installation Ollama échouée"
+        log_warn "L'agent fonctionnera sans IA - installer manuellement avec :"
+        log_warn "  curl -fsSL https://ollama.com/install.sh | sh"
+    fi
+fi
+
+# 6.5.2 Démarrer le service Ollama
+if command -v ollama &>/dev/null; then
+    if systemctl is-active --quiet ollama 2>/dev/null; then
+        log_ok "Service ollama actif"
+    else
+        log_info "Démarrage du service ollama..."
+        systemctl enable ollama 2>&1 | tail -1
+        systemctl start ollama
+        sleep 3
+        if systemctl is-active --quiet ollama 2>/dev/null; then
+            log_ok "Service ollama démarré"
+        else
+            log_warn "Service ollama n'a pas démarré - voir : systemctl status ollama"
+        fi
+    fi
+
+    # 6.5.3 Vérifier que l'API répond
+    log_info "Test de l'API Ollama (http://localhost:11434)..."
+    sleep 2
+    if curl -sf -m 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        log_ok "API Ollama répond"
+
+        # 6.5.4 Lister les modèles existants
+        EXISTING_MODELS=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+
+        # 6.5.5 Télécharger les modèles requis (~2-3 GB chacun)
+        MODELS_TO_PULL="qwen2.5:3b llama3.2:3b"
+        for model in $MODELS_TO_PULL; do
+            if echo "$EXISTING_MODELS" | grep -q "^${model}$"; then
+                log_ok "Modèle $model déjà téléchargé"
+            else
+                log_info "Téléchargement de $model (~2 GB)..."
+                log_info "  Cela peut prendre 5-15 minutes selon la connexion..."
+                if ollama pull "$model" 2>&1 | tail -3; then
+                    log_ok "Modèle $model téléchargé"
+                else
+                    log_warn "Téléchargement de $model échoué - réessayer manuellement :"
+                    log_warn "  ollama pull $model"
+                fi
+            fi
+        done
+    else
+        log_warn "API Ollama ne répond pas - les modèles ne peuvent pas être téléchargés"
+        log_warn "Réessayer manuellement :"
+        log_warn "  sudo systemctl start ollama"
+        log_warn "  ollama pull qwen2.5:3b && ollama pull llama3.2:3b"
+    fi
+else
+    log_warn "Ollama non disponible - l'agent fonctionnera sans IA"
+fi
+
+# 6.5.6 Activer l'IA dans la BDD M2 si Ollama répond
+if curl -sf -m 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
+    # Trouver la BDD M2
+    M2_DB=""
+    for candidate in /var/lib/siem-africa/siem.db /opt/siem-africa/database/siem.db /var/lib/siem-africa/database/siem.db; do
+        if [ -f "$candidate" ]; then
+            M2_DB="$candidate"
+            break
+        fi
+    done
+
+    if [ -n "$M2_DB" ]; then
+        log_info "Activation de l'IA dans la BDD M2 ($M2_DB)..."
+        sqlite3 "$M2_DB" <<EOF 2>/dev/null
+INSERT INTO settings (key, value, value_type, category) VALUES ('ai_enabled', 'true', 'bool', 'ai')
+    ON CONFLICT(key) DO UPDATE SET value='true';
+INSERT INTO settings (key, value, value_type, category) VALUES ('ai_endpoint', 'http://localhost:11434', 'text', 'ai')
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+INSERT INTO settings (key, value, value_type, category) VALUES ('ai_default_model', 'qwen2.5:3b', 'text', 'ai')
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+EOF
+        if [ $? -eq 0 ]; then
+            log_ok "IA activée dans la BDD (ai_enabled=true, model=qwen2.5:3b)"
+        else
+            log_warn "Activation IA en BDD échouée - à faire manuellement"
+        fi
+    else
+        log_warn "BDD M2 introuvable - activer manuellement l'IA dans settings"
+    fi
+fi
+
+# ============================================================================
 # 7. Configuration agent.env
 # ============================================================================
 log_step "Configuration agent.env"
@@ -354,6 +510,12 @@ log_step "Mise à jour credentials"
 if [ -f "$CREDENTIALS_FILE" ]; then
     # Append seulement si la section n'existe pas déjà
     if ! grep -q "\[MODULE 3 - AGENT\]" "$CREDENTIALS_FILE"; then
+        # Détecter quels modèles Ollama sont installés
+        OLLAMA_MODELS_LIST=""
+        if curl -sf -m 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+            OLLAMA_MODELS_LIST=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | tr '\n' ',' | sed 's/,$//')
+        fi
+
         cat >> "$CREDENTIALS_FILE" <<EOF
 
 ═══════════════════════════════════════════════════════════
@@ -368,11 +530,18 @@ Config runtime       : $AGENT_ENV
 Service systemd      : siem-agent.service
 Date installation    : $(date '+%Y-%m-%d %H:%M:%S')
 
+Ollama (IA locale) :
+  Endpoint           : http://localhost:11434
+  Modèles installés  : ${OLLAMA_MODELS_LIST:-aucun}
+  Service systemd    : ollama.service
+
 Commandes utiles :
-  Status   : sudo systemctl status siem-agent
-  Logs     : sudo journalctl -u siem-agent -f
-  Logs app : sudo tail -f $LOG_DIR/agent.log
-  Restart  : sudo systemctl restart siem-agent
+  Status agent  : sudo systemctl status siem-agent
+  Logs agent    : sudo journalctl -u siem-agent -f
+  Logs app      : sudo tail -f $LOG_DIR/agent.log
+  Restart agent : sudo systemctl restart siem-agent
+  Status Ollama : sudo systemctl status ollama
+  Modèles IA    : ollama list
 EOF
         log_ok "Section [MODULE 3 - AGENT] ajoutée à $CREDENTIALS_FILE"
     else
