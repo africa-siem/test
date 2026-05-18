@@ -95,8 +95,11 @@ class AIEnricher(threading.Thread):
         cache_ttl = ai_settings.get("ai_cache_ttl_hours", 168)
 
         # 1. Vérifier cache
+        source = event.get("source", "wazuh")
+        rule_id = event.get("rule_id")
         if ai_settings.get("ai_cache_enabled", True):
-            cached = self.db.get_ai_cache(signature_id, model, ttl_hours=cache_ttl)
+            cached = self.db.get_ai_cache(signature_id, model, ttl_hours=cache_ttl,
+                                          source=source, rule_id=rule_id)
             if cached:
                 logger.debug(f"Cache IA HIT pour alert #{alert_id}")
                 self.db.update_alert_ai(alert_id, {
@@ -158,6 +161,9 @@ class AIEnricher(threading.Thread):
             explanation_fr=description_fr,
             prompt_used=prompt[:1000],
             generation_time_ms=elapsed_ms,
+            source=source,
+            rule_id=rule_id,
+            remediation=parsed.get("recommandations"),
         )
 
         # 5. UPDATE alert
