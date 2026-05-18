@@ -73,43 +73,62 @@ def check_wazuh_log():
         return False
 
 
+def _scan_settings(conn, patterns):
+    """Helper : scanne settings et retourne dict {key: value} pour les clés matchant un pattern."""
+    cursor = conn.cursor()
+    where = " OR ".join([f"LOWER(key) LIKE '%{p}%'" for p in patterns])
+    cursor.execute(f"SELECT key, value FROM settings WHERE {where}")
+    return {k: v for k, v in cursor.fetchall()}
+
+
+def _find_first(d, candidates):
+    """Cherche la première clé trouvée dans d parmi candidates (avec variantes)."""
+    for c in candidates:
+        for variant in (c, c.lower(), c.upper(), c.replace("_", "."), c.replace(".", "_")):
+            if variant in d and d[variant] not in (None, ""):
+                return d[variant]
+    return None
+
+
 def check_smtp_config():
-    """
-    Vérifie qu'une config SMTP minimale existe en BDD.
-    Non bloquant : si pas de SMTP, l'agent fonctionne sans emails.
-    """
+    """Vérifie que SMTP est configuré. Tolérant aux noms de clés (M2 peut nommer ses
+    clés smtp_password, smtp.password, mail_password, etc.)."""
     try:
         conn = sqlite3.connect(str(DB_PATH), timeout=5)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT key, value FROM settings
-            WHERE category = 'smtp'
-            AND key IN ('smtp_enabled', 'smtp_host', 'smtp_username',
-                        'smtp_password', 'smtp_alert_recipients')
-        """)
-        rows = cursor.fetchall()
+        config = _scan_settings(conn, ["smtp", "mail", "email", "recipient"])
         conn.close()
 
-        config = {key: value for key, value in rows}
+        host = _find_first(config, ["smtp_host", "smtp.host", "mail_host", "smtp_server"])
+        username = _find_first(config, ["smtp_username", "smtp.username", "smtp_user",
+                                        "mail_username", "mail_user"])
+        password = _find_first(config, ["smtp_password", "smtp.password", "smtp_pass",
+                                        "mail_password"])
+        recipients = _find_first(config, ["smtp_alert_recipients", "alert_recipients",
+                                          "mail_recipients", "smtp_to", "admin_email",
+                                          "notification_email"])
 
-        enabled = config.get("smtp_enabled", "false").lower() == "true"
+        enabled_raw = _find_first(config, ["smtp_enabled", "smtp.enabled", "mail_enabled"])
+        if enabled_raw is None:
+            # Si pas de clé enabled mais qu'on a host+user+pwd → on suppose enabled
+            enabled = bool(host and username and password)
+        else:
+            enabled = str(enabled_raw).lower() in ("true", "1", "yes", "on")
+
         if not enabled:
             logger.info("SMTP désactivé dans settings")
             return False
 
-        # Vérifier les champs critiques
-        missing = []
-        for key in ["smtp_host", "smtp_username", "smtp_password", "smtp_alert_recipients"]:
-            if not config.get(key, "").strip():
-                missing.append(key)
-
+        missing = [n for n, v in [("host", host), ("username", username),
+                                  ("password", password)] if not v]
         if missing:
-            logger.warning(f"Config SMTP incomplète - manquant : {', '.join(missing)}")
-            logger.warning("Les emails seront désactivés tant que la config est incomplète")
+            logger.warning(f"Config SMTP incomplète, manquant : {missing}")
+            logger.warning(f"Clés détectées en BDD : {sorted(config.keys())}")
             return False
 
-        logger.info(f"SMTP OK ({config['smtp_host']})")
+        if not recipients:
+            logger.warning("Aucun destinataire SMTP - fallback sur l'admin sera utilisé")
+
+        logger.info(f"SMTP OK ({host})")
         return True
     except Exception as e:
         logger.warning(f"Impossible de lire la config SMTP : {e}")
@@ -117,37 +136,39 @@ def check_smtp_config():
 
 
 def check_ollama():
-    """
-    Vérifie que l'API Ollama répond.
-    Non bloquant : si Ollama down, l'agent continue sans IA.
-    """
+    """Vérifie qu'Ollama répond. Tolérant aux noms de clés en BDD."""
     try:
-        # Lire la config IA depuis settings
         conn = sqlite3.connect(str(DB_PATH), timeout=5)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT key, value FROM settings
-            WHERE key IN ('ai_enabled', 'ai_endpoint')
-        """)
-        rows = cursor.fetchall()
+        config = _scan_settings(conn, ["ai", "ollama", "llm"])
         conn.close()
-        config = {key: value for key, value in rows}
 
-        enabled = config.get("ai_enabled", "false").lower() == "true"
+        enabled_raw = _find_first(config, ["ai_enabled", "ai.enabled", "ollama_enabled", "llm_enabled"])
+        endpoint = _find_first(config, ["ai_endpoint", "ai.endpoint", "ollama_endpoint",
+                                        "ollama_url", "llm_endpoint", "ai_url"])
+
+        if enabled_raw is None:
+            enabled = bool(endpoint)
+        else:
+            enabled = str(enabled_raw).lower() in ("true", "1", "yes", "on")
+
         if not enabled:
             logger.info("IA désactivée dans settings")
             return False
 
-        endpoint = config.get("ai_endpoint", "http://localhost:11434")
+        if not endpoint:
+            endpoint = "http://localhost:11434"
+            logger.info(f"Endpoint IA non trouvé en BDD, utilisation par défaut : {endpoint}")
 
-        # Test API Ollama
-        import urllib.request
+        import urllib.request, json
         try:
             with urllib.request.urlopen(f"{endpoint}/api/tags", timeout=3) as resp:
                 if resp.status == 200:
-                    import json
                     data = json.loads(resp.read())
                     models = [m["name"] for m in data.get("models", [])]
+                    if not models:
+                        logger.warning(f"Ollama OK mais AUCUN MODÈLE installé. "
+                                       f"Lancer : ollama pull qwen2.5:3b")
+                        return False
                     logger.info(f"Ollama OK - {len(models)} modèles : {models}")
                     return True
         except Exception as e:
