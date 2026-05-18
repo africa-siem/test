@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def check_database():
-    """Vérifie que la base SQLite est accessible en lecture+écriture."""
+    """Vérifie que la base SQLite est accessible en lecture+écriture.
+    Compatible schéma M2 réel : audit_log.action_category NOT NULL."""
     if not DB_PATH.exists():
         logger.error(f"BDD introuvable : {DB_PATH}")
         return False
@@ -35,10 +36,10 @@ def check_database():
         cursor.execute("SELECT COUNT(*) FROM signatures LIMIT 1")
         nb = cursor.fetchone()[0]
 
-        # Vérifier qu'on peut écrire (insertion test dans audit_log)
+        # Vérifier qu'on peut écrire (avec action_category NOT NULL)
         cursor.execute("""
-            INSERT INTO audit_log (action, resource_type, details, created_at)
-            VALUES ('healthcheck', 'system', 'Agent healthcheck OK', datetime('now'))
+            INSERT INTO audit_log (action, action_category)
+            VALUES ('healthcheck', 'SYSTEM')
         """)
         conn.commit()
         conn.close()
