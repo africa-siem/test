@@ -22,38 +22,181 @@ class EmailSender:
         self._reload_client()
 
     def _reload_client(self):
-        """Recharge la config SMTP depuis les settings."""
-        smtp_settings = self.db.get_settings_by_category("smtp")
-        if not smtp_settings.get("smtp_enabled"):
+        """Charge la config SMTP depuis settings de façon TOLÉRANTE.
+
+        L'agent ne sait pas exactement comment le M2 a nommé ses clés
+        (smtp_password, smtp.password, mail_password, etc.). On scanne donc
+        TOUTES les settings de la BDD et on cherche par mots-clés.
+        """
+        smtp_settings = self._discover_smtp_settings()
+
+        # Status enabled : on cherche les variantes possibles
+        enabled = self._first_value(smtp_settings, ["smtp_enabled", "smtp.enabled", "mail_enabled"])
+        # Si pas de clé enabled trouvée mais qu'il y a host+user+password → on suppose enabled
+        if enabled is None:
+            has_creds = (
+                self._first_value(smtp_settings, ["smtp_host", "smtp.host", "mail_host", "smtp_server"])
+                and self._first_value(smtp_settings, ["smtp_password", "smtp.password", "mail_password", "password"])
+            )
+            enabled = True if has_creds else False
+        else:
+            # Convertir string en bool si besoin
+            if isinstance(enabled, str):
+                enabled = enabled.lower() in ("true", "1", "yes", "on")
+
+        if not enabled:
+            logger.info("SMTP désactivé dans settings")
             self.client = None
             return False
 
-        host = smtp_settings.get("smtp_host", "")
-        port = smtp_settings.get("smtp_port", 587)
-        username = smtp_settings.get("smtp_username", "")
-        password = smtp_settings.get("smtp_password", "")
-        use_tls = smtp_settings.get("smtp_use_tls", True)
-        from_email = smtp_settings.get("smtp_from_email", username)
-        from_name = smtp_settings.get("smtp_from_name", "SIEM Africa")
+        host = self._first_value(smtp_settings, [
+            "smtp_host", "smtp.host", "mail_host", "smtp_server", "mail_server"
+        ], default="")
+        port = self._first_value(smtp_settings, [
+            "smtp_port", "smtp.port", "mail_port"
+        ], default=587)
+        try:
+            port = int(port)
+        except (ValueError, TypeError):
+            port = 587
+        username = self._first_value(smtp_settings, [
+            "smtp_username", "smtp.username", "smtp_user", "mail_username", "mail_user", "smtp_login"
+        ], default="")
+        password = self._first_value(smtp_settings, [
+            "smtp_password", "smtp.password", "smtp_pass", "mail_password", "mail_pass"
+        ], default="")
+        use_tls = self._first_value(smtp_settings, [
+            "smtp_use_tls", "smtp.use_tls", "smtp_tls", "mail_tls", "smtp_starttls"
+        ], default=True)
+        if isinstance(use_tls, str):
+            use_tls = use_tls.lower() in ("true", "1", "yes", "on")
+        from_email = self._first_value(smtp_settings, [
+            "smtp_from_email", "smtp_from", "smtp.from_email", "mail_from", "mail_from_email"
+        ], default=username)
+        from_name = self._first_value(smtp_settings, [
+            "smtp_from_name", "smtp.from_name", "mail_from_name", "from_name"
+        ], default="SIEM Africa")
 
-        if not all([host, username, password]):
-            logger.warning("Config SMTP incomplète")
+        if not host or not username or not password:
+            missing = [n for n, v in [("host", host), ("username", username), ("password", password)] if not v]
+            logger.warning(f"Config SMTP incomplète, manquant : {missing}. "
+                           f"Clés SMTP disponibles en BDD : {sorted(smtp_settings.keys())}")
             self.client = None
             return False
 
+        logger.info(f"SMTP configuré : {host}:{port} (user={username}, tls={use_tls})")
         self.client = SMTPClient(
             host=host, port=port, username=username, password=password,
             use_tls=use_tls, from_email=from_email, from_name=from_name,
         )
         return True
 
+    def _discover_smtp_settings(self):
+        """Découvre toutes les clés SMTP en BDD, sans dépendre de la colonne 'category'.
+        Cherche dans toutes les settings dont la clé contient smtp/mail."""
+        all_settings = {}
+        try:
+            # D'abord par catégorie (cas standard)
+            try:
+                cat = self.db.get_settings_by_category("smtp")
+                all_settings.update(cat or {})
+            except Exception:
+                pass
+            try:
+                cat = self.db.get_settings_by_category("mail")
+                all_settings.update(cat or {})
+            except Exception:
+                pass
+            try:
+                cat = self.db.get_settings_by_category("email")
+                all_settings.update(cat or {})
+            except Exception:
+                pass
+
+            # Ensuite : scan complet par nom de clé
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    SELECT key, value, value_type FROM settings
+                    WHERE LOWER(key) LIKE '%smtp%'
+                       OR LOWER(key) LIKE '%mail%'
+                       OR LOWER(key) LIKE '%email%'
+                       OR LOWER(key) LIKE '%recipient%'
+                """)
+                for row in cur.fetchall():
+                    key, value, vtype = row["key"], row["value"], row["value_type"]
+                    if key in all_settings:
+                        continue
+                    if value is None:
+                        all_settings[key] = None
+                        continue
+                    if vtype in ("bool", "boolean"):
+                        all_settings[key] = value.lower() in ("true", "1", "yes", "on")
+                    elif vtype in ("int", "integer", "number"):
+                        try:
+                            all_settings[key] = int(value)
+                        except (ValueError, TypeError):
+                            all_settings[key] = 0
+                    else:
+                        all_settings[key] = value
+        except Exception as e:
+            logger.error(f"Erreur découverte settings SMTP : {e}")
+        return all_settings
+
+    @staticmethod
+    def _first_value(settings, keys, default=None):
+        """Retourne la première valeur trouvée parmi les keys (avec variantes de casse)."""
+        for k in keys:
+            for variant in (k, k.lower(), k.upper(), k.replace("_", "."), k.replace(".", "_")):
+                if variant in settings and settings[variant] not in (None, ""):
+                    return settings[variant]
+        return default
+
     def is_enabled(self):
         return self.client is not None
 
     def _get_recipients(self):
-        """Retourne la liste des destinataires depuis settings."""
-        recipients = self.db.get_setting("smtp_alert_recipients", "")
-        return [e.strip() for e in recipients.split(",") if e.strip()]
+        """Retourne la liste des destinataires en cherchant tolérant en BDD.
+
+        Cherche plusieurs noms de clés possibles. Si rien trouvé, fallback :
+        utilise l'email de l'admin (du compte user le plus récent).
+        """
+        smtp_settings = self._discover_smtp_settings()
+
+        recipients_str = self._first_value(smtp_settings, [
+            "smtp_alert_recipients", "smtp.alert_recipients", "alert_recipients",
+            "mail_recipients", "smtp_recipients", "smtp_to",
+            "smtp_alert_recipient", "mail_to", "notification_email", "admin_email"
+        ], default="")
+
+        if recipients_str:
+            recipients = [e.strip() for e in str(recipients_str).split(",") if e.strip() and "@" in e]
+            if recipients:
+                return recipients
+
+        # Fallback : email de l'admin (utilisateur le plus ancien actif)
+        try:
+            with self.db.cursor() as cur:
+                cur.execute("""
+                    SELECT email FROM users
+                    WHERE is_active = 1 AND email IS NOT NULL AND email != ''
+                    ORDER BY id ASC LIMIT 1
+                """)
+                row = cur.fetchone()
+                if row:
+                    logger.info(f"Aucun destinataire SMTP configuré, fallback sur admin : {row[0]}")
+                    return [row[0]]
+        except Exception as e:
+            logger.debug(f"Fallback users.email échoué : {e}")
+
+        # Dernier fallback : utiliser l'email expéditeur SMTP
+        from_email = self._first_value(smtp_settings, [
+            "smtp_from_email", "smtp_username", "smtp_user", "mail_from"
+        ], default=None)
+        if from_email and "@" in from_email:
+            logger.info(f"Aucun destinataire trouvé, fallback sur expéditeur : {from_email}")
+            return [from_email]
+
+        return []
 
     def _can_send(self, subject):
         """Vérifie anti-spam (rate limit + dedup)."""
