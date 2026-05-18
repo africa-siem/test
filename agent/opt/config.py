@@ -1,76 +1,118 @@
-"""SIEM Africa - Agent : Chargement de la configuration."""
+"""
+SIEM Africa - Agent (Module 3)
+Configuration centralisée
+
+Toutes les constantes de chemins et la lecture de l'agent.env.
+Les paramètres dynamiques (SMTP, IA, seuils) sont lus depuis la table settings
+de la base de données, pas ici.
+"""
 import os
 from pathlib import Path
 
+# ============================================================================
+# CHEMINS SYSTEME
+# ============================================================================
+AGENT_DIR = Path("/opt/siem-africa-agent")
+AGENT_ENV_FILE = Path("/etc/siem-africa/agent.env")
 
-def _load_env_file(path):
-    """Charge un fichier KEY=VALUE dans os.environ s'il n'y est pas deja."""
-    if not Path(path).is_file():
-        return
+# Base de donnees (M2)
+DB_PATH = Path("/var/lib/siem-africa/siem.db")
+
+# Logs Wazuh
+WAZUH_LOG = Path("/var/ossec/logs/alerts/alerts.json")
+
+# Logs agent
+LOG_DIR = Path("/var/log/siem-africa")
+LOG_FILE = LOG_DIR / "agent.log"
+
+# Backups BDD (bloc 8)
+BACKUP_DIR = Path("/var/backups/siem-africa")
+
+# Templates email (bloc 6)
+TEMPLATES_DIR = AGENT_DIR / "notif" / "templates"
+
+
+# ============================================================================
+# UTILISATEUR ET GROUPE UNIX
+# ============================================================================
+AGENT_USER = "siem-agent"
+SIEM_GROUP = "siem-africa"
+
+
+# ============================================================================
+# CONSTANTES METIER
+# ============================================================================
+# Sévérités valides (cohérent avec schema M2)
+SEVERITIES = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+# Niveaux de sévérité (ordre numérique pour comparaisons)
+SEVERITY_LEVELS = {
+    "INFO": 1,
+    "LOW": 2,
+    "MEDIUM": 3,
+    "HIGH": 4,
+    "CRITICAL": 5,
+}
+
+# Sources d'alertes valides
+SOURCES = ["wazuh", "snort", "custom"]
+
+# Statuts d'alertes
+STATUSES = ["NEW", "ACKNOWLEDGED", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE", "IGNORED"]
+
+# Statuts IA
+AI_STATUSES = ["not_required", "pending", "cached", "fresh", "failed", "disabled"]
+
+
+# ============================================================================
+# CONFIGURATION RUNTIME (lue depuis agent.env)
+# ============================================================================
+def load_env():
+    """
+    Charge les variables depuis /etc/siem-africa/agent.env.
+    Retourne un dict avec les valeurs trouvées.
+    Le fichier est créé par install_agent.sh.
+    """
+    env = {}
+    if not AGENT_ENV_FILE.exists():
+        return env
+
     try:
-        with open(path, "r") as f:
+        with open(AGENT_ENV_FILE, "r") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
+                # Skip commentaires et lignes vides
+                if not line or line.startswith("#"):
                     continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-    except Exception as exc:  # noqa: BLE001
-        print(f"[config] Avertissement : impossible de lire {path} : {exc}")
+                # Parse KEY=value
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    # Trim guillemets si présents
+                    value = value.strip().strip('"').strip("'")
+                    env[key] = value
+    except Exception as e:
+        # On laisse passer, le healthcheck remontera le problème
+        pass
+
+    return env
 
 
-# Charger la config principale
-_load_env_file("/etc/siem-africa/agent.env")
-# Charger SMTP (key=value separe pour des questions de permissions)
-_load_env_file("/etc/siem-africa/smtp.env")
+# Valeurs runtime (chargées au démarrage)
+ENV = load_env()
+
+# Niveau de log : DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = ENV.get("LOG_LEVEL", "INFO")
+
+# Intervalle de polling Wazuh en secondes (fallback si inotify échoue)
+WAZUH_POLL_INTERVAL = int(ENV.get("WAZUH_POLL_INTERVAL", "5"))
 
 
-def get(key, default=None):
-    return os.environ.get(key, default)
-
-
-def get_bool(key, default=False):
-    val = os.environ.get(key, str(default)).strip().lower()
-    return val in ("true", "1", "yes", "on")
-
-
-def get_int(key, default=0):
-    try:
-        return int(os.environ.get(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
-# Constantes pratiques
-DB_PATH = get("DB_PATH", "/var/lib/siem-africa/siem.db")
-LOG_DIR = get("LOG_DIR", "/var/log/siem-africa")
-LOG_LEVEL = get("LOG_LEVEL", "INFO")
-
-WAZUH_ALERTS_FILE = get("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json")
-WAZUH_WATCHER_ENABLED = get_bool("WAZUH_WATCHER_ENABLED", True)
-
-SNORT_ALERT_FILE = get("SNORT_ALERT_FILE", "/var/log/snort/alert")
-SNORT_WATCHER_ENABLED = get_bool("SNORT_WATCHER_ENABLED", True)
-
-OLLAMA_HOST = get("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_TIMEOUT = get_int("OLLAMA_TIMEOUT", 60)
-OLLAMA_HEALTHCHECK_RETRIES = get_int("OLLAMA_HEALTHCHECK_RETRIES", 3)
-OLLAMA_HEALTHCHECK_INTERVAL = get_int("OLLAMA_HEALTHCHECK_INTERVAL", 10)
-
-SMTP_HOST = get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = get_int("SMTP_PORT", 587)
-SMTP_USER = get("SMTP_USER", "")
-SMTP_PASS = get("SMTP_PASS", "")
-SMTP_FROM = get("SMTP_FROM", SMTP_USER)
-SMTP_TO = get("SMTP_TO", SMTP_USER)
-SMTP_USE_TLS = get_bool("SMTP_USE_TLS", True)
-
-EMAIL_ENABLED = get_bool("EMAIL_ENABLED", True)
-EMAIL_ALL_ALERTS = get_bool("EMAIL_ALL_ALERTS", True)
-
-AI_DEGRADED_MODE_ALLOWED = get_bool("AI_DEGRADED_MODE_ALLOWED", True)
-IP_BLOCK_ENABLED = get_bool("IP_BLOCK_ENABLED", False)
-KPI_SNAPSHOT_ENABLED = get_bool("KPI_SNAPSHOT_ENABLED", True)
+# ============================================================================
+# HELPERS
+# ============================================================================
+def severity_at_least(severity, minimum):
+    """Retourne True si severity >= minimum dans l'ordre INFO < LOW < ... < CRITICAL."""
+    if severity not in SEVERITY_LEVELS or minimum not in SEVERITY_LEVELS:
+        return False
+    return SEVERITY_LEVELS[severity] >= SEVERITY_LEVELS[minimum]
