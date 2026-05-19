@@ -280,4 +280,20 @@ class AIEnricher(threading.Thread):
             "ai_cache_id": cache_id,
         })
 
+        # 6. UPDATE signatures.description_fr / remediation_fr
+        # Si la signature n'avait pas de description française (typiquement une
+        # signature auto-créée), on la remplit pour que les futures requêtes
+        # aient toujours une info en français disponible directement dans la table
+        # signatures (pas seulement dans ai_signature_cache).
+        # La méthode update_signature_description utilise COALESCE pour ne pas
+        # écraser une description existante (les 380 signatures du M2 sont préservées).
+        try:
+            self.db.update_signature_description(
+                signature_id=signature_id,
+                description_fr=description_fr,
+                remediation_fr=parsed.get("recommandations"),
+            )
+        except Exception as e:
+            logger.debug(f"update_signature_description (non bloquant) : {e}")
+
         logger.info(f"Alerte #{alert_id} enrichie par IA ({model}, {elapsed_ms}ms)")
