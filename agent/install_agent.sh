@@ -277,6 +277,21 @@ chmod 770 "$(dirname $DB_PATH)" 2>/dev/null
 chgrp "$SIEM_GROUP" "$(dirname $DB_PATH)" 2>/dev/null
 log_ok "Permissions BDD ajustées"
 
+# Permissions sur smtp.env du M2 (pour que l'agent puisse lire le password SMTP)
+if [ -f /etc/siem-africa/smtp.env ]; then
+    chgrp "$SIEM_GROUP" /etc/siem-africa/smtp.env
+    chmod 640 /etc/siem-africa/smtp.env
+    log_ok "Permissions sur smtp.env ajustées (lecture par siem-agent)"
+fi
+
+# Pareil pour les autres .env du M2 éventuels
+for env_file in /etc/siem-africa/mail.env /etc/siem-africa/agent.env; do
+    if [ -f "$env_file" ]; then
+        chgrp "$SIEM_GROUP" "$env_file" 2>/dev/null
+        chmod 640 "$env_file" 2>/dev/null
+    fi
+done
+
 # ============================================================================
 # 5. Venv Python
 # ============================================================================
