@@ -1,119 +1,48 @@
 """
 SIEM Africa - Agent (Module 3) - notif/email_sender.py
-EmailSender : logique anti-spam + 4 types d'emails (alerte, bienvenue, récap, pic).
+EmailSender : auto-découverte SMTP (BDD + /etc/siem-africa/smtp.env) + anti-spam + 4 types d'emails.
 """
+import os
 import logging
 from datetime import datetime
 
 from db import get_db
-from config import severity_at_least
 from notif.smtp_client import SMTPClient
 
 logger = logging.getLogger(__name__)
 
+SEVERITY_ORDER = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
-# ============================================================================
+
+def severity_at_least(sev, min_sev):
+    return SEVERITY_ORDER.get(sev, 0) >= SEVERITY_ORDER.get(min_sev, 0)
+
+
 class EmailSender:
-    """Gère l'envoi des emails avec anti-spam et templating."""
+    """Envoi d'emails avec auto-config SMTP + anti-spam."""
 
     def __init__(self):
         self.db = get_db()
         self.client = None
+        self.from_email = None
         self._reload_client()
 
-    def _reload_client(self):
-        """Charge la config SMTP depuis settings de façon TOLÉRANTE.
-
-        L'agent ne sait pas exactement comment le M2 a nommé ses clés
-        (smtp_password, smtp.password, mail_password, etc.). On scanne donc
-        TOUTES les settings de la BDD et on cherche par mots-clés.
-        """
-        smtp_settings = self._discover_smtp_settings()
-
-        # Status enabled : on cherche les variantes possibles
-        enabled = self._first_value(smtp_settings, ["smtp_enabled", "smtp.enabled", "mail_enabled"])
-        # Si pas de clé enabled trouvée mais qu'il y a host+user+password → on suppose enabled
-        if enabled is None:
-            has_creds = (
-                self._first_value(smtp_settings, ["smtp_host", "smtp.host", "mail_host", "smtp_server"])
-                and self._first_value(smtp_settings, ["smtp_password", "smtp.password", "mail_password", "password"])
-            )
-            enabled = True if has_creds else False
-        else:
-            # Convertir string en bool si besoin
-            if isinstance(enabled, str):
-                enabled = enabled.lower() in ("true", "1", "yes", "on")
-
-        if not enabled:
-            logger.info("SMTP désactivé dans settings")
-            self.client = None
-            return False
-
-        host = self._first_value(smtp_settings, [
-            "smtp_host", "smtp.host", "mail_host", "smtp_server", "mail_server"
-        ], default="")
-        port = self._first_value(smtp_settings, [
-            "smtp_port", "smtp.port", "mail_port"
-        ], default=587)
-        try:
-            port = int(port)
-        except (ValueError, TypeError):
-            port = 587
-        username = self._first_value(smtp_settings, [
-            "smtp_username", "smtp.username", "smtp_user", "mail_username", "mail_user", "smtp_login"
-        ], default="")
-        password = self._first_value(smtp_settings, [
-            "smtp_password", "smtp.password", "smtp_pass", "mail_password", "mail_pass"
-        ], default="")
-        use_tls = self._first_value(smtp_settings, [
-            "smtp_use_tls", "smtp.use_tls", "smtp_tls", "mail_tls", "smtp_starttls"
-        ], default=True)
-        if isinstance(use_tls, str):
-            use_tls = use_tls.lower() in ("true", "1", "yes", "on")
-        from_email = self._first_value(smtp_settings, [
-            "smtp_from_email", "smtp_from", "smtp.from_email", "mail_from", "mail_from_email"
-        ], default=username)
-        from_name = self._first_value(smtp_settings, [
-            "smtp_from_name", "smtp.from_name", "mail_from_name", "from_name"
-        ], default="SIEM Africa")
-
-        if not host or not username or not password:
-            missing = [n for n, v in [("host", host), ("username", username), ("password", password)] if not v]
-            logger.warning(f"Config SMTP incomplète, manquant : {missing}. "
-                           f"Clés SMTP disponibles en BDD : {sorted(smtp_settings.keys())}")
-            self.client = None
-            return False
-
-        logger.info(f"SMTP configuré : {host}:{port} (user={username}, tls={use_tls})")
-        self.client = SMTPClient(
-            host=host, port=port, username=username, password=password,
-            use_tls=use_tls, from_email=from_email, from_name=from_name,
-        )
-        return True
-
     def _discover_smtp_settings(self):
-        """Découvre toutes les clés SMTP en BDD, sans dépendre de la colonne 'category'.
-        Cherche dans toutes les settings dont la clé contient smtp/mail."""
+        """Cherche les settings SMTP partout :
+        1. BDD : table settings (categories smtp/mail/email + scan par nom)
+        2. Fichiers .env : /etc/siem-africa/smtp.env, agent.env
+        Les valeurs .env complètent les BDD vides."""
         all_settings = {}
-        try:
-            # D'abord par catégorie (cas standard)
+
+        for cat_name in ("smtp", "mail", "email"):
             try:
-                cat = self.db.get_settings_by_category("smtp")
-                all_settings.update(cat or {})
-            except Exception:
-                pass
-            try:
-                cat = self.db.get_settings_by_category("mail")
-                all_settings.update(cat or {})
-            except Exception:
-                pass
-            try:
-                cat = self.db.get_settings_by_category("email")
-                all_settings.update(cat or {})
+                cat = self.db.get_settings_by_category(cat_name)
+                if cat:
+                    all_settings.update(cat)
             except Exception:
                 pass
 
-            # Ensuite : scan complet par nom de clé
+        try:
             with self.db.cursor() as cur:
                 cur.execute("""
                     SELECT key, value, value_type FROM settings
@@ -124,14 +53,15 @@ class EmailSender:
                 """)
                 for row in cur.fetchall():
                     key, value, vtype = row["key"], row["value"], row["value_type"]
-                    if key in all_settings:
+                    if key in all_settings and all_settings[key]:
                         continue
                     if value is None:
                         all_settings[key] = None
                         continue
-                    if vtype in ("bool", "boolean"):
+                    vt = (vtype or "").lower()
+                    if vt in ("bool", "boolean"):
                         all_settings[key] = value.lower() in ("true", "1", "yes", "on")
-                    elif vtype in ("int", "integer", "number"):
+                    elif vt in ("int", "integer", "number"):
                         try:
                             all_settings[key] = int(value)
                         except (ValueError, TypeError):
@@ -139,41 +69,124 @@ class EmailSender:
                     else:
                         all_settings[key] = value
         except Exception as e:
-            logger.error(f"Erreur découverte settings SMTP : {e}")
+            logger.debug(f"Scan BDD SMTP échoué : {e}")
+
+        env_files = [
+            "/etc/siem-africa/smtp.env",
+            "/etc/siem-africa/mail.env",
+            "/etc/siem-africa/agent.env",
+        ]
+        mappings = {
+            "smtp_user": "smtp_username",
+            "smtp_from": "smtp_from_email",
+            "alert_email": "smtp_alert_recipients",
+            "smtp_tls": "smtp_use_tls",
+        }
+        for env_path in env_files:
+            if not os.path.exists(env_path):
+                continue
+            try:
+                with open(env_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        k, _, v = line.partition("=")
+                        k = k.strip().lower()
+                        v = v.strip().strip('"').strip("'")
+                        if not v:
+                            continue
+                        if not any(p in k for p in ("smtp", "mail", "email", "alert", "recipient")):
+                            continue
+                        final_k = mappings.get(k, k)
+                        if final_k not in all_settings or not all_settings[final_k]:
+                            all_settings[final_k] = v
+            except PermissionError:
+                logger.warning(f"Permission denied sur {env_path}")
+            except Exception as e:
+                logger.debug(f"Lecture {env_path} échouée : {e}")
+
         return all_settings
 
     @staticmethod
     def _first_value(settings, keys, default=None):
-        """Retourne la première valeur trouvée parmi les keys (avec variantes de casse)."""
         for k in keys:
             for variant in (k, k.lower(), k.upper(), k.replace("_", "."), k.replace(".", "_")):
                 if variant in settings and settings[variant] not in (None, ""):
                     return settings[variant]
         return default
 
+    def _reload_client(self):
+        smtp_settings = self._discover_smtp_settings()
+
+        enabled = self._first_value(smtp_settings, ["smtp_enabled", "mail_enabled"])
+        if enabled is None:
+            has_creds = (
+                self._first_value(smtp_settings, ["smtp_host", "mail_host"])
+                and self._first_value(smtp_settings, ["smtp_password", "mail_password"])
+            )
+            enabled = True if has_creds else False
+        else:
+            if isinstance(enabled, str):
+                enabled = enabled.lower() in ("true", "1", "yes", "on")
+
+        if not enabled:
+            logger.info("SMTP désactivé")
+            self.client = None
+            return False
+
+        host = self._first_value(smtp_settings, ["smtp_host", "mail_host", "smtp_server"], default="")
+        try:
+            port = int(self._first_value(smtp_settings, ["smtp_port", "mail_port"], default=587))
+        except (ValueError, TypeError):
+            port = 587
+        username = self._first_value(smtp_settings, [
+            "smtp_username", "smtp_user", "mail_username", "mail_user"
+        ], default="")
+        password = self._first_value(smtp_settings, [
+            "smtp_password", "smtp_pass", "mail_password"
+        ], default="")
+        use_tls = self._first_value(smtp_settings, ["smtp_use_tls", "smtp_tls", "mail_tls"], default=True)
+        if isinstance(use_tls, str):
+            use_tls = use_tls.lower() in ("true", "1", "yes", "on")
+        from_email = self._first_value(smtp_settings, [
+            "smtp_from_email", "smtp_from", "mail_from"
+        ], default=username)
+        from_name = self._first_value(smtp_settings, [
+            "smtp_from_name", "mail_from_name"
+        ], default="SIEM Africa")
+
+        if not host or not username or not password:
+            missing = [n for n, v in [("host", host), ("username", username),
+                                      ("password", password)] if not v]
+            logger.warning(f"Config SMTP incomplète, manquant : {missing}")
+            logger.warning(f"Clés détectées : {sorted(smtp_settings.keys())}")
+            self.client = None
+            return False
+
+        logger.info(f"SMTP configuré : {host}:{port} (user={username}, tls={use_tls})")
+        self.from_email = from_email
+        self.client = SMTPClient(
+            host=host, port=port, username=username, password=password,
+            use_tls=use_tls, from_email=from_email, from_name=from_name,
+        )
+        return True
+
     def is_enabled(self):
         return self.client is not None
 
     def _get_recipients(self):
-        """Retourne la liste des destinataires en cherchant tolérant en BDD.
-
-        Cherche plusieurs noms de clés possibles. Si rien trouvé, fallback :
-        utilise l'email de l'admin (du compte user le plus récent).
-        """
         smtp_settings = self._discover_smtp_settings()
-
-        recipients_str = self._first_value(smtp_settings, [
-            "smtp_alert_recipients", "smtp.alert_recipients", "alert_recipients",
-            "mail_recipients", "smtp_recipients", "smtp_to",
-            "smtp_alert_recipient", "mail_to", "notification_email", "admin_email"
+        rec_str = self._first_value(smtp_settings, [
+            "smtp_alert_recipients", "alert_recipients", "mail_recipients",
+            "smtp_to", "mail_to", "admin_email", "notification_email",
+            "alert_email"
         ], default="")
-
-        if recipients_str:
-            recipients = [e.strip() for e in str(recipients_str).split(",") if e.strip() and "@" in e]
+        if rec_str:
+            recipients = [e.strip() for e in str(rec_str).split(",") if e.strip() and "@" in e]
             if recipients:
                 return recipients
 
-        # Fallback : email de l'admin (utilisateur le plus ancien actif)
         try:
             with self.db.cursor() as cur:
                 cur.execute("""
@@ -183,365 +196,185 @@ class EmailSender:
                 """)
                 row = cur.fetchone()
                 if row:
-                    logger.info(f"Aucun destinataire SMTP configuré, fallback sur admin : {row[0]}")
                     return [row[0]]
-        except Exception as e:
-            logger.debug(f"Fallback users.email échoué : {e}")
+        except Exception:
+            pass
 
-        # Dernier fallback : utiliser l'email expéditeur SMTP
-        from_email = self._first_value(smtp_settings, [
-            "smtp_from_email", "smtp_username", "smtp_user", "mail_from"
-        ], default=None)
-        if from_email and "@" in from_email:
-            logger.info(f"Aucun destinataire trouvé, fallback sur expéditeur : {from_email}")
-            return [from_email]
+        if self.from_email and "@" in self.from_email:
+            return [self.from_email]
 
         return []
 
     def _can_send(self, subject):
-        """Vérifie anti-spam (rate limit + dedup)."""
-        # Rate limit
-        rate_limit = self.db.get_setting("smtp_rate_limit_per_hour", 30) or 30
-        recent_count = self.db.count_recent_emails(window_minutes=60)
-        if recent_count >= rate_limit:
-            logger.warning(f"Rate limit SMTP atteint ({recent_count}/{rate_limit})")
+        smtp_settings = self.db.get_settings_by_category("smtp")
+        try:
+            rate_limit = int(smtp_settings.get("smtp_rate_limit_per_hour", 30))
+        except (ValueError, TypeError):
+            rate_limit = 30
+        sent_count = self.db.count_recent_emails(window_minutes=60)
+        if sent_count >= rate_limit:
+            logger.warning(f"Rate limit atteint ({sent_count}/{rate_limit}/h)")
             return False
-
         return True
 
-    def _send_to_all(self, subject, body, alert_id=None, dedup=True):
-        """Envoie à tous les destinataires avec trace."""
+    def send_alert(self, alert_id):
         if not self.is_enabled():
             return False
-
-        recipients = self._get_recipients()
-        if not recipients:
-            logger.warning("Aucun destinataire configuré")
-            return False
-
-        if not self._can_send(subject):
-            for r in recipients:
-                self.db.insert_email_log(r, subject, "rate_limited", alert_id=alert_id)
-            return False
-
-        sent_count = 0
-        for recipient in recipients:
-            # Dédup par destinataire
-            if dedup and self.db.email_already_sent(recipient, subject, window_minutes=5):
-                logger.debug(f"Email déjà envoyé récemment à {recipient}, skip")
-                self.db.insert_email_log(recipient, subject, "deduplicated", alert_id=alert_id)
-                continue
-
-            success, error = self.client.send([recipient], subject, body)
-            if success:
-                self.db.insert_email_log(recipient, subject, "sent", alert_id=alert_id)
-                sent_count += 1
-            else:
-                self.db.insert_email_log(recipient, subject, "failed",
-                                         alert_id=alert_id, error_message=error)
-                logger.error(f"Échec envoi à {recipient} : {error}")
-
-        return sent_count > 0
-
-    # ========================================================================
-    # TYPE 1 : EMAIL D'ALERTE
-    # ========================================================================
-    def send_alert(self, alert_id):
-        """Envoie un email pour une alerte spécifique."""
         alert = self.db.get_alert_by_id(alert_id)
         if not alert:
             return False
 
-        # Vérifier la sévérité minimum
-        min_sev = self.db.get_setting("smtp_min_severity", "HIGH")
+        smtp_settings = self.db.get_settings_by_category("smtp")
+        min_sev = smtp_settings.get("smtp_min_severity", "HIGH")
         if not severity_at_least(alert["severity"], min_sev):
-            logger.debug(f"Alerte #{alert_id} sévérité {alert['severity']} < {min_sev}, pas d'email")
+            logger.debug(f"Alerte #{alert_id} sous min_severity ({alert['severity']} < {min_sev})")
             return False
 
-        # Récupérer le contexte signature
-        sig = self.db.get_signature_with_context(alert["signature_id"])
+        if not self._can_send(alert["title"]):
+            for rec in self._get_recipients():
+                self.db.insert_email_log(rec, alert["title"][:200], "rate_limited", alert_id=alert_id)
+            return False
 
-        subject = f"[SIEM Africa] {alert['severity']} - {alert['title'][:80]}"
-        body = self._build_alert_body(alert, sig)
+        subject = f"[{alert['severity']}] {alert['title'][:80]}"
+        body = self._build_alert_body(alert)
+        recipients = self._get_recipients()
+        if not recipients:
+            logger.warning("Aucun destinataire pour l'email d'alerte")
+            return False
 
-        return self._send_to_all(subject, body, alert_id=alert_id)
+        sent_to = []
+        for rec in recipients:
+            if self.db.email_already_sent(rec, subject, window_minutes=5):
+                self.db.insert_email_log(rec, subject, "deduplicated", alert_id=alert_id)
+                continue
+            success, err = self.client.send([rec], subject, body)
+            status = "sent" if success else "failed"
+            self.db.insert_email_log(rec, subject, status, alert_id=alert_id, error_message=err)
+            if success:
+                sent_to.append(rec)
+                logger.info(f"Email envoyé à {rec} (alert #{alert_id})")
+            else:
+                logger.warning(f"Email à {rec} échoué : {err}")
 
-    def _build_alert_body(self, alert, sig=None):
-        """Construit le corps texte d'un email d'alerte."""
-        sev_icon = {"CRITICAL": "[CRITICAL]", "HIGH": "[HIGH]",
-                    "MEDIUM": "[MEDIUM]", "LOW": "[LOW]", "INFO": "[INFO]"}.get(alert["severity"], "[?]")
+        return len(sent_to) > 0
 
-        lines = []
-        lines.append("=" * 60)
-        lines.append("SIEM AFRICA - NOTIFICATION D'ALERTE")
-        lines.append("=" * 60)
-        lines.append("")
-        lines.append(f"{sev_icon} ALERTE {alert['severity']}")
-        lines.append(f"Detectee le : {alert['created_at']}")
-        lines.append("")
-        lines.append("-" * 60)
-        lines.append("  RESUME")
-        lines.append("-" * 60)
-        lines.append(f"Type        : {alert['title']}")
-        if alert.get("description"):
-            lines.append(f"Description : {alert['description'][:300]}")
-        if alert.get("ai_description"):
-            lines.append("")
-            lines.append("Analyse IA :")
-            lines.append(f"  {alert['ai_description'][:500]}")
-        lines.append("")
-
-        # Attaquant
+    def _build_alert_body(self, alert):
+        lines = [
+            f"ALERTE {alert['severity']} - SIEM Africa",
+            "=" * 60,
+            "",
+            f"ID alerte    : #{alert['id']}",
+            f"Date         : {alert.get('created_at', 'N/A')}",
+            f"Titre        : {alert['title']}",
+            f"Sévérité     : {alert['severity']}",
+            f"Confiance    : {alert.get('confidence', 'N/A')}/100",
+            "",
+            "DETAILS",
+            "-" * 60,
+        ]
         if alert.get("src_ip"):
-            lines.append("-" * 60)
-            lines.append("  ATTAQUANT")
-            lines.append("-" * 60)
-            lines.append(f"IP source : {alert['src_ip']}")
-            if alert.get("src_port"):
-                lines.append(f"Port      : {alert['src_port']}")
-            rep = self.db.get_ip_reputation(alert["src_ip"])
-            if rep:
-                lines.append(f"Reputation: {rep['reputation_score']}/100 (vue {rep['times_seen']} fois)")
-            lines.append("")
-
-        # Cible
+            lines.append(f"IP source    : {alert['src_ip']}")
         if alert.get("dst_ip"):
-            lines.append("-" * 60)
-            lines.append("  CIBLE")
-            lines.append("-" * 60)
-            lines.append(f"IP cible    : {alert['dst_ip']}")
-            if alert.get("dst_port"):
-                lines.append(f"Port attaque: {alert['dst_port']}")
-            if alert.get("protocol"):
-                lines.append(f"Protocole   : {alert['protocol']}")
-            lines.append("")
-
-        # Stats
+            lines.append(f"IP cible     : {alert['dst_ip']}")
+        if alert.get("src_port"):
+            lines.append(f"Port source  : {alert['src_port']}")
+        if alert.get("dst_port"):
+            lines.append(f"Port cible   : {alert['dst_port']}")
+        if alert.get("protocol"):
+            lines.append(f"Protocole    : {alert['protocol']}")
         if alert.get("event_count", 1) > 1:
-            lines.append("-" * 60)
-            lines.append("  STATISTIQUES")
-            lines.append("-" * 60)
-            lines.append(f"Tentatives : {alert['event_count']}")
-            lines.append(f"Premiere   : {alert.get('first_seen', '?')}")
-            lines.append(f"Derniere   : {alert.get('last_seen', '?')}")
+            lines.append(f"Occurrences  : {alert['event_count']}")
+        if alert.get("description"):
             lines.append("")
+            lines.append(f"Description  : {alert['description'][:300]}")
 
-        # MITRE
-        if sig and sig.get("mitre_technique_id"):
-            lines.append("-" * 60)
-            lines.append("  MITRE ATT&CK")
-            lines.append("-" * 60)
-            lines.append(f"Tactique  : {sig.get('mitre_tactic_id', '?')} - {sig.get('mitre_tactic_name', '')}")
-            lines.append(f"Technique : {sig['mitre_technique_id']} - {sig.get('mitre_technique_name', '')}")
-            lines.append("")
-
-        # Recommandations IA
+        if alert.get("ai_description"):
+            lines.extend(["", "ANALYSE IA", "-" * 60, alert["ai_description"][:500]])
         if alert.get("ai_remediation"):
-            try:
-                import json
-                remediations = json.loads(alert["ai_remediation"]) if isinstance(alert["ai_remediation"], str) else alert["ai_remediation"]
-                if remediations and isinstance(remediations, list):
-                    lines.append("-" * 60)
-                    lines.append("  RECOMMANDATIONS")
-                    lines.append("-" * 60)
-                    for i, r in enumerate(remediations[:5], 1):
-                        lines.append(f"{i}. {r}")
-                    lines.append("")
-            except Exception:
-                pass
+            lines.extend(["", "RECOMMANDATIONS", "-" * 60, str(alert["ai_remediation"])[:500]])
 
-        lines.append("=" * 60)
-        lines.append("Notification automatique - SIEM Africa")
-        lines.append("=" * 60)
-
+        lines.extend([
+            "", "=" * 60,
+            "SIEM Africa - Détection automatique",
+            "Voir le dashboard pour plus de détails",
+        ])
         return "\n".join(lines)
 
-    # ========================================================================
-    # TYPE 2 : EMAIL DE BIENVENUE (démarrage agent)
-    # ========================================================================
     def send_welcome(self, healthcheck_results=None):
-        """Email envoyé au démarrage de l'agent."""
         if not self.is_enabled():
             return False
-
         recipients = self._get_recipients()
         if not recipients:
             return False
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        hc = healthcheck_results or {}
-
-        subject = "[SIEM Africa] Agent demarre"
+        subject = "[SIEM Africa] Agent démarré"
         lines = [
-            "=" * 60,
-            "SIEM AFRICA - AGENT DEMARRE",
-            "=" * 60,
+            "AGENT SIEM AFRICA - DEMARRAGE",
+            "=" * 60, "",
+            f"Date démarrage : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
-            f"L'agent SIEM Africa est actif depuis {now}.",
-            "",
-            "Healthcheck demarrage :",
-            f"  - BDD          : {'OK' if hc.get('db') else 'KO'}",
-            f"  - Wazuh log    : {'OK' if hc.get('wazuh_log') else 'KO'}",
-            f"  - SMTP         : {'OK' if hc.get('smtp') else 'KO (configurez les credentials)'}",
-            f"  - Ollama IA    : {'OK' if hc.get('ollama') else 'KO (mode degrade)'}",
-            "",
-            "Vous recevrez les alertes selon votre configuration",
-            "(Settings > SMTP > Severite minimale).",
-            "",
-            "Configuration actuelle :",
-            f"  - Severite minimum : {self.db.get_setting('smtp_min_severity', 'HIGH')}",
-            f"  - Rate limit       : {self.db.get_setting('smtp_rate_limit_per_hour', 30)} emails/heure",
-            f"  - Destinataires    : {len(recipients)}",
-            "",
-            "=" * 60,
-            "Notification automatique - SIEM Africa",
-            "=" * 60,
+            "HEALTHCHECK",
+            "-" * 60,
         ]
-
+        if healthcheck_results:
+            for k, v in healthcheck_results.items():
+                status = "OK" if v else "FAIL"
+                lines.append(f"  {k:15s} : {status}")
+        lines.extend(["", "L'agent est opérationnel et traite les alertes Wazuh en temps réel."])
         body = "\n".join(lines)
-        return self._send_to_all(subject, body, dedup=False)
 
-    # ========================================================================
-    # TYPE 3 : RECAP QUOTIDIEN
-    # ========================================================================
+        for rec in recipients:
+            success, err = self.client.send([rec], subject, body)
+            status = "sent" if success else "failed"
+            self.db.insert_email_log(rec, subject, status, error_message=err)
+            if success:
+                logger.info(f"Email bienvenue envoyé à {rec}")
+        return True
+
     def send_daily_recap(self):
-        """Email récap quotidien matin (à appeler par cron à 7h)."""
         if not self.is_enabled():
             return False
-
-        # Récupérer stats des dernières 24h
-        try:
-            with self.db.cursor() as cur:
-                # Total
-                cur.execute("""
-                    SELECT COUNT(*) FROM alerts
-                    WHERE created_at >= datetime('now', '-1 day')
-                """)
-                total = cur.fetchone()[0]
-
-                # Par sévérité
-                stats_sev = {}
-                for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
-                    cur.execute("""
-                        SELECT COUNT(*) FROM alerts
-                        WHERE created_at >= datetime('now', '-1 day')
-                        AND severity = ?
-                    """, (sev,))
-                    stats_sev[sev] = cur.fetchone()[0]
-
-                # Top IPs
-                cur.execute("""
-                    SELECT src_ip, COUNT(*) as nb FROM alerts
-                    WHERE created_at >= datetime('now', '-1 day')
-                    AND src_ip IS NOT NULL
-                    GROUP BY src_ip ORDER BY nb DESC LIMIT 5
-                """)
-                top_ips = cur.fetchall()
-
-                # IPs bloquées
-                cur.execute("""
-                    SELECT COUNT(*) FROM blocked_ips
-                    WHERE blocked_at >= datetime('now', '-1 day')
-                """)
-                blocked_today = cur.fetchone()[0]
-
-                cur.execute("SELECT COUNT(*) FROM blocked_ips WHERE is_active = 1")
-                blocked_active = cur.fetchone()[0]
-
-        except Exception as e:
-            logger.error(f"Erreur stats récap : {e}")
+        recipients = self._get_recipients()
+        if not recipients:
             return False
 
-        subject = f"[SIEM Africa] Recap quotidien - {datetime.now().strftime('%d/%m/%Y')}"
+        metrics = self.db.compute_daily_kpis()
+        subject = f"[SIEM Africa] Récap quotidien - {datetime.now().strftime('%Y-%m-%d')}"
+        lines = ["RECAP SIEM AFRICA - 24 dernières heures", "=" * 60, ""]
+        for name, val_unit in sorted(metrics.items()):
+            if isinstance(val_unit, tuple):
+                val, unit = val_unit
+            else:
+                val, unit = val_unit, "count"
+            lines.append(f"  {name:30s} : {val} {unit}")
+        body = "\n".join(lines)
 
-        lines = [
-            "=" * 60,
-            "SIEM AFRICA - RECAP QUOTIDIEN",
-            "=" * 60,
-            "",
-            f"Date : {datetime.now().strftime('%d/%m/%Y')}",
-            "",
-            f"Total alertes 24h : {total}",
-            f"  Critical : {stats_sev['CRITICAL']}",
-            f"  High     : {stats_sev['HIGH']}",
-            f"  Medium   : {stats_sev['MEDIUM']}",
-            f"  Low      : {stats_sev['LOW']}",
-            "",
-        ]
+        for rec in recipients:
+            success, err = self.client.send([rec], subject, body)
+            status = "sent" if success else "failed"
+            self.db.insert_email_log(rec, subject, status, error_message=err)
+        return True
 
-        if top_ips:
-            lines.append("Top IPs attaquantes :")
-            for ip, nb in top_ips:
-                lines.append(f"  {ip} : {nb} alertes")
-            lines.append("")
-
-        lines.extend([
-            f"IPs bloquees (24h) : {blocked_today}",
-            f"IPs actuellement bloquees : {blocked_active}",
-            "",
-            "=" * 60,
-            "SIEM Africa",
-            "=" * 60,
-        ])
-
-        return self._send_to_all(subject, "\n".join(lines), dedup=False)
-
-    # ========================================================================
-    # TYPE 4 : PIC D'ATTAQUE
-    # ========================================================================
     def send_attack_peak(self, alert_count):
-        """Email quand un pic d'attaques est détecté."""
         if not self.is_enabled():
+            return False
+        recipients = self._get_recipients()
+        if not recipients:
             return False
 
         subject = f"[SIEM Africa] PIC D'ATTAQUE - {alert_count} alertes/min"
+        body = f"""ALERTE - PIC D'ATTAQUE DETECTE
+{'='*60}
 
-        # Récupérer les IPs impliquées
-        try:
-            with self.db.cursor() as cur:
-                cur.execute("""
-                    SELECT src_ip, COUNT(*) as nb FROM alerts
-                    WHERE created_at >= datetime('now', '-1 minute')
-                    AND src_ip IS NOT NULL
-                    GROUP BY src_ip ORDER BY nb DESC LIMIT 10
-                """)
-                top_ips = cur.fetchall()
-        except Exception:
-            top_ips = []
+Une activité anormale a été détectée :
+  Nombre d'alertes : {alert_count} en 1 minute
 
-        lines = [
-            "=" * 60,
-            "SIEM AFRICA - PIC D'ATTAQUE DETECTE",
-            "=" * 60,
-            "",
-            f"ATTENTION : {alert_count} alertes detectees en 1 minute.",
-            "Ce niveau est anormal et peut indiquer une attaque coordonnee.",
-            "",
-            "Heure : " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "",
-        ]
+Date : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-        if top_ips:
-            lines.append("IPs sources impliquees :")
-            for ip, nb in top_ips:
-                lines.append(f"  {ip} : {nb} alertes")
-            lines.append("")
+Connectez-vous au dashboard pour voir les détails."""
 
-        lines.extend([
-            "Recommandations :",
-            "  1. Verifier immediatement le dashboard",
-            "  2. Identifier le pattern d'attaque",
-            "  3. Bloquer manuellement les IPs si necessaire",
-            "  4. Verifier l'integrite des serveurs critiques",
-            "",
-            "=" * 60,
-            "Notification automatique - SIEM Africa",
-            "=" * 60,
-        ])
-
-        return self._send_to_all(subject, "\n".join(lines), dedup=False)
-
-
-# ============================================================================
-# WORKER EMAIL (thread)
-# ============================================================================
+        for rec in recipients:
+            success, err = self.client.send([rec], subject, body)
+            status = "sent" if success else "failed"
+            self.db.insert_email_log(rec, subject, status, error_message=err)
+        return True
