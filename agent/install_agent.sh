@@ -158,11 +158,34 @@ fi
 PY_VERSION=$(python3 --version | cut -d' ' -f2)
 log_ok "Python $PY_VERSION"
 
-# venv module
+# venv module - test robuste avec création réelle
 if ! python3 -c "import venv" 2>/dev/null; then
     log_warn "python3-venv non installé, installation..."
-    apt-get install -y python3-venv 2>&1 | tail -2
+    apt-get install -y python3-venv python3-full 2>&1 | tail -3
 fi
+
+# Vérifier qu'on peut RÉELLEMENT créer un venv (test à blanc)
+_test_venv=$(mktemp -d)
+if ! python3 -m venv "$_test_venv/test" 2>&1 | grep -qv "Error\|error"; then
+    # Si la création échoue silencieusement, le binaire python n'existera pas
+    if [ ! -x "$_test_venv/test/bin/python" ] || [ ! -x "$_test_venv/test/bin/pip" ]; then
+        log_warn "venv ne fonctionne pas correctement, installation des paquets manquants..."
+        apt-get install -y python3-venv python3-pip python3-full 2>&1 | tail -3
+
+        # Re-test
+        rm -rf "$_test_venv"
+        _test_venv=$(mktemp -d)
+        python3 -m venv "$_test_venv/test" 2>&1 | tail -3
+        if [ ! -x "$_test_venv/test/bin/pip" ]; then
+            log_err "Impossible de créer un venv Python fonctionnel"
+            log_err "Lancer manuellement : sudo apt install -y python3-venv python3-pip python3-full"
+            rm -rf "$_test_venv"
+            exit 1
+        fi
+    fi
+fi
+rm -rf "$_test_venv"
+log_ok "python3-venv fonctionnel"
 
 # SQLite
 if ! command -v sqlite3 &>/dev/null; then
@@ -298,12 +321,38 @@ done
 log_step "Création du venv Python"
 
 cd "$AGENT_DIR"
-python3 -m venv venv 2>&1 | tail -2
+python3 -m venv venv 2>&1 | tail -3
+
+# Vérification stricte : python ET pip doivent exister
 if [ ! -x "$AGENT_DIR/venv/bin/python" ]; then
-    log_err "Création venv échouée"
+    log_err "Création venv échouée : binaire python absent"
+    log_err "Lancer : sudo apt install -y python3-venv python3-pip python3-full"
     exit 1
 fi
-log_ok "venv Python créé"
+
+if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+    log_warn "venv créé mais pip absent - bootstrap pip..."
+    "$AGENT_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1 | tail -3
+
+    if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+        log_err "Impossible d'installer pip dans le venv"
+        log_err "Tentative de réinstallation des paquets manquants..."
+        apt-get install -y python3-pip python3-full 2>&1 | tail -3
+
+        # Recréer le venv from scratch
+        rm -rf "$AGENT_DIR/venv"
+        python3 -m venv "$AGENT_DIR/venv" 2>&1 | tail -3
+
+        if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+            log_err "Échec définitif. Lancer manuellement :"
+            log_err "  sudo apt install -y python3-venv python3-pip python3-full"
+            log_err "  Puis relancer ce script"
+            exit 1
+        fi
+    fi
+fi
+
+log_ok "venv Python opérationnel (python + pip)"
 
 # Mise à jour pip
 "$AGENT_DIR/venv/bin/pip" install --upgrade pip 2>&1 | tail -1
