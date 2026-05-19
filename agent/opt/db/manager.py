@@ -149,6 +149,54 @@ class DatabaseManager:
             logger.error(f"create_unknown_signature : {e}")
             return None
 
+    def update_signature_description(self, signature_id, description_fr=None, remediation_fr=None):
+        """Met à jour description_fr et remediation_fr d'une signature.
+
+        Utilisé par l'AIEnricher : lorsqu'Ollama enrichit une signature qui
+        n'avait pas de description française (typiquement une signature
+        auto-créée par create_unknown_signature), on remplit la BDD pour
+        que les futures requêtes voient directement le contenu en français.
+
+        Args:
+            signature_id : ID de la signature à mettre à jour
+            description_fr : Texte français descriptif (str)
+            remediation_fr : Recommandations - peut être str ou list (sera converti en texte)
+
+        Returns:
+            True si une ligne a été mise à jour, False sinon.
+        """
+        try:
+            # On ne met à jour que les champs vides (pour ne pas écraser
+            # les descriptions manuelles déjà présentes dans le M2)
+            updates = []
+            params = []
+
+            if description_fr:
+                updates.append("description_fr = COALESCE(NULLIF(TRIM(description_fr), ''), ?)")
+                params.append(description_fr[:2000])
+
+            if remediation_fr:
+                # Convertir liste → texte numéroté si besoin
+                if isinstance(remediation_fr, list):
+                    rem_text = "\n".join(f"{i+1}. {r}" for i, r in enumerate(remediation_fr))
+                else:
+                    rem_text = str(remediation_fr)
+                updates.append("remediation_fr = COALESCE(NULLIF(TRIM(remediation_fr), ''), ?)")
+                params.append(rem_text[:2000])
+
+            if not updates:
+                return False
+
+            params.append(signature_id)
+            sql = f"UPDATE signatures SET {', '.join(updates)} WHERE id = ?"
+
+            with self.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"update_signature_description({signature_id}) : {e}")
+            return False
+
     # ========================================================================
     # ALERTS
     # ========================================================================
