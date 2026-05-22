@@ -93,6 +93,109 @@ SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
     "from core.chat_db import ensure_chat_tables; ensure_chat_tables(); print('Tables de chat OK')" \
     2>/dev/null || warn "Création des tables de chat reportée au premier démarrage."
 
+# --- Rôle ADMIN + user de test (idempotent, auto-adaptatif) -----------------
+# Garantit qu'un rôle ADMIN existe (FK obligatoire pour créer un user) et, si
+# CREATE_TEST_USER=1, crée un compte de test utilisable par dashboard/tests/.
+# Le script détecte seul l'app du modèle User (users.* ou core.*) et les champs
+# réellement présents : il fonctionne donc sur les deux versions du dashboard.
+#
+# Activer le compte de test :   CREATE_TEST_USER=1 sudo bash install_dashboard.sh
+# Identifiants par défaut (surchargeables) :
+TEST_USER_EMAIL="${TEST_USER_EMAIL:-test-auth@siem-africa.local}"
+TEST_USER_PASSWORD="${TEST_USER_PASSWORD:-TestPass1234567!}"
+CREATE_TEST_USER="${CREATE_TEST_USER:-0}"
+
+log "Vérification du rôle ADMIN (et compte de test si demandé)..."
+SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
+  CREATE_TEST_USER="${CREATE_TEST_USER}" \
+  TEST_USER_EMAIL="${TEST_USER_EMAIL}" \
+  TEST_USER_PASSWORD="${TEST_USER_PASSWORD}" \
+  "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" shell <<'PYEOF' 2>/dev/null || warn "Étape rôle/user de test reportée."
+import os, uuid
+from datetime import datetime
+
+# 1. Localiser le modèle User quelle que soit l'app (users.* puis core.*)
+User = None
+for mod in ("users.models", "core.models"):
+    try:
+        m = __import__(mod, fromlist=["User"])
+        User = getattr(m, "User")
+        break
+    except Exception:
+        continue
+if User is None:
+    print("User introuvable — etape ignoree")
+    raise SystemExit(0)
+
+fields = {f.name for f in User._meta.get_fields()}
+
+# 2. Fonction de hash : reutilise celle du projet, sinon argon2 direct
+def _hash(pwd):
+    for mod in ("core.auth", "users.auth", "core.security"):
+        try:
+            h = __import__(mod, fromlist=["hash_password"])
+            return h.hash_password(pwd)
+        except Exception:
+            continue
+    from argon2 import PasswordHasher
+    return PasswordHasher().hash(pwd)
+
+# 3. Garantir le role ADMIN si le modele User a une FK 'role'
+role_obj = None
+if "role" in fields:
+    try:
+        RoleModel = User._meta.get_field("role").related_model
+        rf = {f.name for f in RoleModel._meta.get_fields()}
+        q = RoleModel.objects.filter(code__iexact="ADMIN") if "code" in rf else RoleModel.objects.all()
+        role_obj = q.first()
+        if role_obj is None:
+            kw = {}
+            if "code" in rf: kw["code"] = "ADMIN"
+            if "name" in rf: kw["name"] = "Administrateur"
+            if "permissions" in rf: kw["permissions"] = "*"
+            role_obj = RoleModel.objects.create(**kw)
+            print("Role ADMIN cree")
+        else:
+            print("Role ADMIN deja present")
+    except Exception as e:
+        print("Role ADMIN : etape ignoree (%s)" % e)
+
+# 4. Creer le user de test seulement si demande
+if os.environ.get("CREATE_TEST_USER") != "1":
+    print("Compte de test non demande (CREATE_TEST_USER!=1)")
+    raise SystemExit(0)
+
+email = os.environ["TEST_USER_EMAIL"]
+pwd   = os.environ["TEST_USER_PASSWORD"]
+User.objects.filter(email=email).delete()
+
+# create_user si le manager l'expose, sinon create() en remplissant les champs presents
+if hasattr(User.objects, "create_user"):
+    kw = {"email": email, "password": pwd}
+    if "full_name" in fields:    kw["full_name"] = "Test Auth"
+    if "role" in fields and role_obj is not None: kw["role"] = role_obj
+    if "is_staff" in fields:     kw["is_staff"] = True
+    if "is_superuser" in fields: kw["is_superuser"] = True
+    u = User.objects.create_user(**kw)
+    if "must_change_pwd" in fields:
+        u.must_change_pwd = 0; u.save()
+else:
+    kw = {"email": email}
+    if "user_uuid" in fields:     kw["user_uuid"] = str(uuid.uuid4())
+    if "first_name" in fields:    kw["first_name"] = "Test"
+    if "last_name" in fields:     kw["last_name"] = "Auth"
+    if "full_name" in fields:     kw["full_name"] = "Test Auth"
+    if "password_hash" in fields: kw["password_hash"] = _hash(pwd)
+    if "role" in fields and role_obj is not None: kw["role"] = role_obj
+    if "is_active" in fields:      kw["is_active"] = 1
+    if "is_locked" in fields:      kw["is_locked"] = 0
+    if "must_change_pwd" in fields: kw["must_change_pwd"] = 0
+    if "language" in fields:       kw["language"] = "fr"
+    if "created_at" in fields:     kw["created_at"] = datetime.now().isoformat()
+    User.objects.create(**kw)
+print("Compte de test pret : %s" % email)
+PYEOF
+
 # --- Collecte des fichiers statiques ----------------------------------------
 log "Collecte des fichiers statiques..."
 SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
@@ -180,6 +283,10 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
     echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
     echo "  Connexion    : avec le compte ADMIN créé à l'installation"
     echo "                 du Module 2."
+    if [ "${CREATE_TEST_USER}" = "1" ]; then
+    echo "  Compte test  : ${TEST_USER_EMAIL} / ${TEST_USER_PASSWORD}"
+    echo "                 (créé pour dashboard/tests/ — à ne pas laisser en prod)"
+    fi
     echo "============================================================"
 else
     err "Le service n'a pas démarré. Vérifiez : journalctl -u ${SERVICE_NAME}"
