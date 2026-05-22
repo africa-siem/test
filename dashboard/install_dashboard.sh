@@ -20,6 +20,10 @@ SERVICE_NAME="siem-dashboard"
 BIND_ADDR="127.0.0.1:8000"
 NGINX_PORT="80"
 
+# IP du serveur, utilisée pour CSRF_TRUSTED_ORIGINS (validation des POST login).
+# Surchargeable : SERVER_IP=192.168.1.128 sudo bash install_dashboard.sh
+SERVER_IP="${SERVER_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -118,6 +122,8 @@ Environment="SIEM_SESSION_PATH=${SESSIONS_DIR}"
 Environment="DJANGO_SECRET_KEY=${SECRET_KEY}"
 Environment="DJANGO_DEBUG=false"
 Environment="DJANGO_SECURE_COOKIES=false"
+Environment="DJANGO_ALLOWED_HOSTS=${SERVER_IP},localhost,127.0.0.1"
+Environment="DJANGO_CSRF_TRUSTED_ORIGINS=http://${SERVER_IP},http://localhost,http://127.0.0.1"
 ExecStart=${APP_DIR}/venv/bin/gunicorn config.wsgi:application --bind ${BIND_ADDR} --workers 3 --timeout 120
 Restart=always
 RestartSec=5
