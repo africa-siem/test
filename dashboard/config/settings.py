@@ -87,37 +87,13 @@ SESSION_FILE_PATH = os.environ.get(
 )
 SESSION_COOKIE_NAME = "siem_session"
 SESSION_COOKIE_HTTPONLY = True
-# "Lax" (et non "Strict") : indispensable quand le dashboard est accédé par
-# IP nue en HTTP. En "Strict", le cookie de session n'est pas renvoyé lors de
-# la redirection 302 vers /login/?next=..., ce qui casse l'authentification
-# (403 CSRF au login + 302 en boucle sur toutes les pages).
-SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = "Strict"
 SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "false").lower() == "true"
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # --- CSRF ---------------------------------------------------------------------
-# IMPORTANT : CSRF_COOKIE_HTTPONLY reste False (défaut Django) pour que le
-# JavaScript des pages KPI puisse lire le token et l'envoyer dans les requêtes
-# fetch/AJAX (header X-CSRFToken). En True, les appels AJAX POST échoueraient.
-CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SAMESITE = "Lax"
-
-# Origines de confiance pour la validation CSRF (obligatoire depuis Django 4).
-# Renseigner l'IP/hôte du serveur. Surchargeable via DJANGO_CSRF_TRUSTED_ORIGINS
-# (liste séparée par des virgules), ex :
-#   "http://192.168.1.128,https://siem.mondomaine.cm"
-_csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").strip()
-if _csrf_origins:
-    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
-else:
-    # Par défaut : on fait confiance aux hôtes déclarés dans ALLOWED_HOSTS,
-    # en http et https, pour éviter de bloquer un déploiement par IP.
-    CSRF_TRUSTED_ORIGINS = []
-    for _host in ALLOWED_HOSTS:
-        _host = _host.strip()
-        if _host and _host != "*":
-            CSRF_TRUSTED_ORIGINS.append(f"http://{_host}")
-            CSRF_TRUSTED_ORIGINS.append(f"https://{_host}")
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Strict"
 
 # --- Validation des mots de passe (la nôtre est dans core/auth.py) ------------
 AUTH_PASSWORD_VALIDATORS = []
