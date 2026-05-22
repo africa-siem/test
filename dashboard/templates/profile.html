@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ t.profile_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">{{ t.profile_title }}</div>
+    <div class="page-subtitle">{{ u.email }}</div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="grid-2">
+            <div class="card">
+                <h3>{{ t.profile_info }}</h3>
+                <div class="form-group">
+                    <label>{{ t.first_name }}</label>
+                    <input type="text" name="first_name" class="form-control" value="{{ u.first_name|default:'' }}">
+                </div>
+                <div class="form-group">
+                    <label>{{ t.last_name }}</label>
+                    <input type="text" name="last_name" class="form-control" value="{{ u.last_name|default:'' }}">
+                </div>
+                <div class="form-group">
+                    <label>{{ t.phone }}</label>
+                    <input type="text" name="phone" class="form-control" value="{{ u.phone|default:'' }}">
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>{{ t.profile_prefs }}</h3>
+                <div class="form-group">
+                    <label>{{ t.language }}</label>
+                    <select name="language" class="select-control">
+                        <option value="fr" {% if u.language == 'fr' %}selected{% endif %}>Français</option>
+                        <option value="en" {% if u.language == 'en' %}selected{% endif %}>English</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>{{ t.theme }}</label>
+                    <select name="theme_preference" class="select-control">
+                        <option value="dark" {% if u.theme_preference == 'dark' %}selected{% endif %}>{{ t.theme_dark }}</option>
+                        <option value="light" {% if u.theme_preference == 'light' %}selected{% endif %}>{{ t.theme_light }}</option>
+                        <option value="auto" {% if u.theme_preference == 'auto' %}selected{% endif %}>{{ t.theme_auto }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary" style="margin-top:8px;">{{ t.save }}</button>
+            </div>
+        </div>
+    </form>
+
+    <div class="card">
+        <h3>{{ t.profile_security }}</h3>
+        <div class="info-row">
+            <span class="label">{{ t.role }}</span>
+            <span>{% if u.role.code == 'ADMIN' %}{{ t.role_ADMIN }}{% elif u.role.code == 'ANALYST' %}{{ t.role_ANALYST }}{% elif u.role.code == 'OPERATOR' %}{{ t.role_OPERATOR }}{% else %}{{ t.role_VIEWER }}{% endif %}</span>
+        </div>
+        <div class="info-row">
+            <span class="label">{{ t.last_login }}</span>
+            <span>{{ u.last_login_at|default:'—' }}</span>
+        </div>
+        <div class="info-row">
+            <span class="label">{{ t.change_my_password }}</span>
+            <a class="btn btn-secondary" href="{% url 'change_password' %}">{{ t.change_my_password }}</a>
+        </div>
+    </div>
+{% endblock %}
