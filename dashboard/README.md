@@ -1,163 +1,152 @@
-# SIEM Africa - Module 4 - Dashboard Django
+# SIEM Africa — Module 4 : Dashboard (Lots 1 à 5 — complet)
 
-Interface web complete pour le SIEM Africa : alertes, KPI, sante systeme,
-parametres, logs admin.
+Interface web Django pour consulter et piloter la solution SIEM Africa.
+Ce dépôt correspond au **Lot 1** : authentification, connexion, changement de
+mot de passe forcé, layout général et page profil.
 
-## Prerequis
+## Ce que contient le Lot 1
 
-- **Module 1** installe (Wazuh + Snort + groupe `siem-africa`)
-- **Module 2** installe (BDD SQLite a `/var/lib/siem-africa/siem.db`)
-- **Module 3** recommande (agent qui genere les alertes)
-- **Ubuntu** 20.04 / 22.04 / 24.04
-- **2 Go RAM minimum**
+- Connexion par email + mot de passe (hash argon2id)
+- Politique de sécurité : 5 tentatives max, blocage 30 min, session 2 h,
+  expiration du mot de passe à 90 jours
+- Changement de mot de passe obligatoire à la première connexion
+- Layout responsive avec menu latéral qui s'adapte au rôle de l'utilisateur
+- Thème sombre / clair
+- Bilingue français / anglais (bascule dynamique)
+- Page « Mon profil » (préférences langue, thème, infos personnelles)
 
-## Installation
 
-```bash
-cd ~/dashboard
-chmod +x install_dashboard.sh verify_dashboard.sh tests/*.sh
-sudo ./install_dashboard.sh
-```
+## Ce que contient le Lot 2 (tableau de bord)
 
-L'installeur :
+- Tableau de bord ADMIN/ANALYST/OPERATOR : 4 compteurs de sévérité avec
+  tendance vs période précédente, graphique des alertes sur 7 jours (Chart.js),
+  score de sécurité 0-100, dernières alertes critiques, top catégories
+  d'attaques, top IPs attaquantes avec pays, état des services
+- Tableau de bord DIRIGEANT (VIEWER) : score en grand avec message rassurant
+  adapté au niveau, 3 indicateurs business (attaques bloquées, compromissions,
+  disponibilité), graphique d'évolution des menaces (thème violet)
+- Auto-refresh automatique toutes les 30 secondes
+- Chart.js embarqué en local (static/js/chart.umd.js) — fonctionne hors ligne
+- Tous les indicateurs calculés en temps réel depuis les tables (pas de
+  dépendance au worker kpi_history)
 
-1. Verifie tous les prerequis
-2. Installe les dependances (Python, Nginx, Gunicorn)
-3. Cree l'utilisateur `siem-dashboard`
-4. Copie le code dans `/opt/siem-africa-dashboard/`
-5. Cree un venv Python avec Django + Gunicorn
-6. Applique les migrations Django (sessions, contenttypes...)
-7. Demande email + mot de passe admin (stockes dans `/root/siem_credentials.txt`)
-8. Configure Gunicorn (port 8000) + Nginx (port 80)
-9. Demarre les services
-10. Lance les tests automatiques
 
-## URLs principales
+## Ce que contient le Lot 3 (alertes, incidents, chat IA)
 
-| URL | Page | Acces |
-|---|---|---|
-| `/` | Redirige vers `/alerts/` | Tous |
-| `/login/` | Connexion | Public |
-| `/alerts/` | Liste des alertes (DataTables) | Tous |
-| `/alerts/<id>/` | Detail alerte + bouton Re-analyser | Tous |
-| `/kpi/` | Tableau de bord KPI (6 graphiques ApexCharts) | Tous |
-| `/health/` | Sante systeme (Wazuh, Snort, Ollama, SMTP, agent) | Tous |
-| `/settings/` | Reglages + Test SMTP + Test modele IA | Admins |
-| `/about/` | Presentation (4 pays + stats) | Tous |
-| `/admin-logs/` | Audit + emails + log agent live | Admins |
-| `/profile/` | Mon profil (theme, langue, password) | Tous |
-| `/django-admin/` | Admin Django (debug) | Superusers |
+- Liste des alertes paginée (25/page) avec filtres : sévérité, statut, source,
+  période, recherche texte (IP, titre, signature)
+- Tags visuels : HONEYPOT, CORRÉLÉE, INCONNUE
+- Détail d'une alerte : contexte technique, technique MITRE ATT&CK,
+  recommandations numérotées, alertes liées (même IP), actions (acquitter,
+  investiguer, résoudre, faux positif) selon le rôle
+- Liste et détail des incidents avec alertes corrélées
+- Chat IA contextuel AVEC historique (niveau 2) sur les pages de détail
+  alerte et incident, réservé aux rôles ADMIN et ANALYST
+- Les tables de chat (chat_conversations, chat_messages) sont créées
+  automatiquement par le dashboard (CREATE TABLE IF NOT EXISTS) sans modifier
+  les fichiers SQL du Module 2
+- Dégradation gracieuse : si Ollama est indisponible, le chat affiche un
+  message clair au lieu de planter
 
-## Architecture
 
-```
-                    Internet / LAN
-                          │
-                          ▼
-                  ┌──────────────┐
-                  │    Nginx     │  port 80 (reverse proxy + statics)
-                  └──────┬───────┘
-                         │
-                  ┌──────┴───────┐
-                  │  Gunicorn    │  port 8000 (3 workers)
-                  └──────┬───────┘
-                         │
-                  ┌──────┴───────┐
-                  │    Django    │  apps : core, users, alerts, kpi,
-                  │              │         health, settings_app,
-                  │              │         about, admin_logs
-                  └──────┬───────┘
-                         │
-                  ┌──────┴───────┐
-                  │   SQLite     │  /var/lib/siem-africa/siem.db
-                  │  (M2 owned)  │  partagee avec M2 et M3
-                  └──────────────┘
-```
+## Ce que contient le Lot 4 (IPs, signatures, utilisateurs, assistant IA)
 
-**Pourquoi Nginx en plus de Gunicorn ?** Nginx sert les statics tres rapidement
-et fait office de reverse proxy. Gunicorn fait tourner Django.
+- IPs bloquées : liste filtrable (actives/toutes), déblocage manuel, blocage
+  manuel d'une IP. Le dashboard marque le déblocage ; l'agent M3 applique la
+  règle iptables.
+- Signatures : consultation des 380 signatures (Wazuh + Snort) avec filtres
+  source/sévérité/catégorie/recherche et compteur de déclenchements.
+- Utilisateurs (ADMIN uniquement) : création de comptes avec mot de passe
+  temporaire généré automatiquement, activation/désactivation, déverrouillage,
+  réinitialisation de mot de passe. Un admin ne peut pas se désactiver lui-même.
+- Assistant IA dédié (ADMIN + ANALYST) : page de chat avec historique des
+  conversations dans une barre latérale, comme une messagerie. On rouvre une
+  conversation et on poursuit le fil.
 
-## Caracteristiques
 
-- **Theme light/dark** (toggle dans la navbar)
-- **Multilingue** : FR (defaut) + EN (menus)
-- **Responsive** : mobile + tablette + desktop
-- **DataTables** : recherche, tri, pagination sur les listes
-- **ApexCharts** : 6 graphiques sur la page KPI
-- **Auto-refresh** : pages alerts/health (10-30s)
-- **Tests automatiques** : 5 suites de tests anti-regression
+## Ce que contient le Lot 5 (paramètres, rapports, audit, déploiement)
 
-## Bugs v1 corriges
+- Paramètres (ADMIN seul) : 6 onglets (Notifications email/SMTP, IA, Réponse
+  active, Corrélation, Rétention, Système). Les mots de passe ne sont jamais
+  réaffichés ; laisser vide pour conserver la valeur existante.
+- Rapports : génération PDF (reportlab) et Excel (openpyxl) sur 7 ou 30 jours,
+  liste des rapports avec téléchargement. Génération automatique prévue chaque
+  lundi à 8h (via tâche planifiée côté agent/cron).
+- Journal d'audit (ADMIN + ANALYST) : consultation des actions tracées, avec
+  filtres par catégorie et par utilisateur.
+- Script d'installation install_dashboard.sh : déploiement complet en service
+  systemd + Gunicorn + Nginx, création des tables de chat, utilisateur dédié,
+  détection et remplacement propre d'une installation précédente.
 
-| Bug | Fix |
-|---|---|
-| Pas de description dans l'UI | `Alert.get_description()` priorite IA, fallback BDD, fallback dynamique |
-| `/settings/` renvoyait HTTP 500 | Toutes les operations en `try/except`, fallbacks systematiques |
-| Agent n'envoyait pas d'email | Module 3 corrige + bouton **Test SMTP** dans `/settings/` |
-| L'IA ne repondait pas | Bouton **Re-analyser** + bouton **Tester ce modele** |
-
-## Verification
+## Déploiement en production (sur la VM)
 
 ```bash
-sudo ./verify_dashboard.sh           # Verification rapide post-install
-sudo ./tests/run_all_tests.sh        # 5 suites de tests
+sudo bash install_dashboard.sh
 ```
 
-## Commandes utiles
+Le script installe tout, pointe sur /var/lib/siem-africa/siem.db, et démarre
+le service. Le dashboard est ensuite accessible sur http://<serveur>/ avec le
+compte ADMIN créé à l'installation du Module 2.
+
+## Prérequis
+
+- Python 3.10 ou supérieur
+- La base SQLite du Module 2 doit exister (avec au moins un compte ADMIN)
+
+## Installation en développement
 
 ```bash
-# Status
-sudo systemctl status siem-dashboard
+# 1. Installer les dépendances
+pip install -r requirements.txt
 
-# Logs
-sudo tail -f /var/log/siem-africa/dashboard-error.log
-sudo tail -f /var/log/siem-africa/nginx-error.log
+# 2. Indiquer le chemin de la base partagée (Module 2)
+export SIEM_DB_PATH="/chemin/vers/siem.db"
 
-# Restart
-sudo systemctl restart siem-dashboard
-sudo systemctl reload nginx
-
-# Recreer un admin (si oublie)
-sudo -u siem-dashboard /opt/siem-africa-dashboard/venv/bin/python \
-    /opt/siem-africa-dashboard/manage.py shell
-
-# Acces shell Django
-cd /opt/siem-africa-dashboard
-sudo -u siem-dashboard bash -c "
-    set -a; . /etc/siem-africa/dashboard.env; set +a
-    /opt/siem-africa-dashboard/venv/bin/python manage.py shell
-"
+# 3. Lancer le serveur de développement
+python3 manage.py runserver 0.0.0.0:8000
 ```
 
-## Configuration
+Le dashboard est alors accessible sur http://localhost:8000
 
-| Fichier | Role |
-|---|---|
-| `/etc/siem-africa/dashboard.env` | Config Django (SECRET_KEY, paths, etc.) |
-| `/etc/nginx/sites-available/siem-africa` | Config Nginx |
-| `/etc/systemd/system/siem-dashboard.service` | Unit systemd Gunicorn |
-| Table `settings` (BDD) | Reglages dynamiques (changeables via `/settings/`) |
+## Variables d'environnement
 
-## Tests automatiques (5 suites)
+| Variable | Rôle | Défaut |
+|----------|------|--------|
+| `SIEM_DB_PATH` | Chemin de la base SQLite partagée | `/var/lib/siem-africa/siem.db` |
+| `DJANGO_SECRET_KEY` | Clé secrète Django (à définir en production) | clé de dev |
+| `DJANGO_DEBUG` | Mode debug (`true`/`false`) | `true` |
+| `DJANGO_ALLOWED_HOSTS` | Hôtes autorisés, séparés par virgule | `*` |
+| `SIEM_SESSION_PATH` | Dossier de stockage des sessions | `.sessions/` |
 
-| # | Suite | Verifie |
-|---|---|---|
-| 1 | `test_01_django_check.sh` | `manage.py check` + tables critiques + admin existe |
-| 2 | `test_02_pages_load.sh` | `/login/`, `/alerts/`, statics, 404 |
-| 3 | `test_03_auth.sh` | Login flow complet (CSRF + cookies + bad password) |
-| 4 | `test_04_settings_no500.sh` | **ANTI-REGRESSION bug v1** + valeur BDD invalide tolerees |
-| 5 | `test_05_test_smtp.sh` | Tous les endpoints API (KPI + admin logs) + bouton SMTP |
+## Architecture du code
 
-## Desinstallation
-
-```bash
-sudo systemctl stop siem-dashboard
-sudo systemctl disable siem-dashboard
-sudo rm /etc/systemd/system/siem-dashboard.service
-sudo rm /etc/nginx/sites-enabled/siem-africa
-sudo rm /etc/nginx/sites-available/siem-africa
-sudo systemctl daemon-reload
-sudo systemctl reload nginx
-sudo rm -rf /opt/siem-africa-dashboard
-sudo rm /etc/siem-africa/dashboard.env  # optionnel
 ```
+config/          Configuration Django (settings, urls, wsgi)
+core/
+  models.py      Modèles mappés sur les tables du Module 2 (managed = False)
+  auth.py        Authentification argon2id + politique de sécurité
+  decorators.py  Protection des vues (login_required, permission_required)
+  i18n.py        Traductions FR / EN
+  context_processors.py  Données communes aux templates (menu, user, langue)
+  views.py       Vues : login, logout, changement MDP, dashboard, profil
+templates/       Gabarits HTML
+static/css/      Feuille de style (thèmes sombre / clair)
+```
+
+## Points importants
+
+- **Aucune migration Django** : tous les modèles sont en `managed = False`.
+  Django ne crée ni ne modifie jamais les tables ; il lit et écrit dans les
+  tables existantes du Module 2. La base reste partagée avec l'agent (Module 3)
+  sans risque de conflit de schéma.
+- **Mode WAL** activé sur SQLite pour permettre à l'agent (qui écrit) et au
+  dashboard (qui lit/écrit) de coexister sans verrouillage prolongé.
+- **Sessions stockées en fichiers** (pas en base) pour ne créer aucune table
+  supplémentaire dans la base du Module 2.
+
+## Lots suivants (à venir)
+
+- Lot 2 : tableau de bord avec indicateurs, graphiques et carte des attaques
+- Lot 3 : alertes, incidents et chat IA contextuel
+- Lot 4 : IPs bloquées, signatures, gestion des utilisateurs
+- Lot 5 : paramètres, rapports PDF/Excel, audit, script d'installation
