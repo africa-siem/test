@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ t.incidents_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">{{ t.incidents_title }}</div>
+    <div class="page-subtitle">{{ total }} {{ t.results_total }}</div>
+
+    <form method="get" class="filters-bar">
+        <div class="filter-field">
+            <label>{{ t.filter_severity }}</label>
+            <select name="severity">
+                <option value="">{{ t.filter_all }}</option>
+                <option value="CRITICAL" {% if f_severity == 'CRITICAL' %}selected{% endif %}>CRITICAL</option>
+                <option value="HIGH" {% if f_severity == 'HIGH' %}selected{% endif %}>HIGH</option>
+                <option value="MEDIUM" {% if f_severity == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+                <option value="LOW" {% if f_severity == 'LOW' %}selected{% endif %}>LOW</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>{{ t.filter_status }}</label>
+            <select name="status">
+                <option value="">{{ t.filter_all }}</option>
+                <option value="OPEN" {% if f_status == 'OPEN' %}selected{% endif %}>OPEN</option>
+                <option value="INVESTIGATING" {% if f_status == 'INVESTIGATING' %}selected{% endif %}>INVESTIGATING</option>
+                <option value="CONTAINED" {% if f_status == 'CONTAINED' %}selected{% endif %}>CONTAINED</option>
+                <option value="RESOLVED" {% if f_status == 'RESOLVED' %}selected{% endif %}>RESOLVED</option>
+                <option value="CLOSED" {% if f_status == 'CLOSED' %}selected{% endif %}>CLOSED</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" style="width:auto;">{{ t.filter_apply }}</button>
+        <a href="{% url 'incidents_list' %}" class="btn btn-secondary btn-sm">{{ t.filter_reset }}</a>
+    </form>
+
+    {% if incidents %}
+    <table class="data-table">
+        <thead><tr>
+            <th>{{ t.col_time }}</th>
+            <th>{{ t.col_severity }}</th>
+            <th>{{ t.col_title }}</th>
+            <th>{{ t.correlated_alerts }}</th>
+            <th>{{ t.col_status }}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>
+        {% for i in incidents %}
+            <tr>
+                <td style="color:var(--text-muted);white-space:nowrap;">{{ i.created_at|slice:"0:16" }}</td>
+                <td><span class="badge-sev {{ i.severity }}">{{ i.severity }}</span></td>
+                <td><a class="row-link" href="{% url 'incident_detail' i.id %}">{{ i.title|truncatechars:46 }}</a></td>
+                <td><strong>{{ i.alert_count }}</strong></td>
+                <td><span class="status-badge status-{{ i.status }}">{{ i.status }}</span></td>
+                <td><a class="row-link" href="{% url 'incident_detail' i.id %}" style="color:var(--accent);">{{ t.view_detail }} →</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="pagination">
+        <span>{{ t.page_of }} {{ page }} / {{ total_pages }}</span>
+        <div style="display:flex;gap:8px;">
+            <a href="?page={{ prev_page }}&severity={{ f_severity }}&status={{ f_status }}" class="{% if not has_prev %}disabled{% endif %}">← {{ t.previous }}</a>
+            <a href="?page={{ next_page }}&severity={{ f_severity }}&status={{ f_status }}" class="{% if not has_next %}disabled{% endif %}">{{ t.next }} →</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty-hint">{{ t.no_incidents }}</div></div>
+    {% endif %}
+{% endblock %}

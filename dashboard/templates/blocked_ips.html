@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ t.blocked_ips_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">{{ t.blocked_ips_title }}</div>
+    <div class="page-subtitle">{{ total }} {{ t.results_total }}</div>
+
+    {% if can_unblock %}
+    <div class="modal-form">
+        <h3 style="color:var(--accent);margin-bottom:14px;">🔒 {{ t.block_ip_manual }}</h3>
+        <form method="post" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="block">
+            <div class="filter-field"><label>IP</label><input type="text" name="ip" placeholder="1.2.3.4" required></div>
+            <div class="filter-field" style="flex:1;"><label>{{ t.col_reason }}</label><input type="text" name="reason" placeholder="{{ t.col_reason }}" style="width:100%;"></div>
+            <button type="submit" class="btn btn-primary btn-sm" style="width:auto;">{{ t.block_ip_manual }}</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div style="display:flex;gap:10px;margin-bottom:16px;">
+        <a href="?active=1" class="toggle-link {% if active_only %}active{% endif %}">{{ t.active_only }}</a>
+        <a href="?" class="toggle-link {% if not active_only %}active{% endif %}">{{ t.filter_all }}</a>
+    </div>
+
+    {% if ips %}
+    <table class="data-table">
+        <thead><tr>
+            <th>IP</th><th>{{ t.col_country }}</th><th>{{ t.col_reason }}</th>
+            <th>{{ t.col_blocked_at }}</th><th>{{ t.col_expires }}</th>
+            <th>{{ t.col_active }}</th>{% if can_unblock %}<th></th>{% endif %}
+        </tr></thead>
+        <tbody>
+        {% for ip in ips %}
+            <tr>
+                <td class="ip-mono">{{ ip.ip_address }}</td>
+                <td>{{ ip.country_code|default:"—" }}{% if ip.country_name %} · {{ ip.country_name }}{% endif %}</td>
+                <td>{{ ip.reason|truncatechars:40 }}</td>
+                <td style="color:var(--text-muted);">{{ ip.blocked_at|slice:"0:16" }}</td>
+                <td style="color:var(--text-muted);">{{ ip.expires_at|slice:"0:16"|default:"Permanent" }}</td>
+                <td>{% if ip.is_active %}<span class="badge-yes">● {{ t.yes }}</span>{% else %}<span class="badge-no">○ {{ t.no }}</span>{% endif %}</td>
+                {% if can_unblock %}
+                <td>
+                    {% if ip.is_active %}
+                    <form method="post" class="inline-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="unblock">
+                        <input type="hidden" name="block_id" value="{{ ip.id }}">
+                        <button type="submit" class="btn-mini danger">{{ t.action_unblock }}</button>
+                    </form>
+                    {% endif %}
+                </td>
+                {% endif %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="pagination">
+        <span>{{ t.page_of }} {{ page }} / {{ total_pages }}</span>
+        <div style="display:flex;gap:8px;">
+            <a href="?page={{ prev_page }}{% if active_only %}&active=1{% endif %}" class="{% if not has_prev %}disabled{% endif %}">← {{ t.previous }}</a>
+            <a href="?page={{ next_page }}{% if active_only %}&active=1{% endif %}" class="{% if not has_next %}disabled{% endif %}">{{ t.next }} →</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty-hint">{{ t.no_blocked_ips }}</div></div>
+    {% endif %}
+{% endblock %}

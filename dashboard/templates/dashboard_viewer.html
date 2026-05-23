@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ t.dashboard }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">{% if lang == 'en' %}Overview{% else %}Vue d'ensemble{% endif %}</div>
+    <div class="page-subtitle">
+        {% if lang == 'en' %}Your infrastructure security status{% else %}État de sécurité de votre infrastructure{% endif %}
+    </div>
+
+    <!-- Hero score -->
+    <div class="hero-score score-{{ score.level }}">
+        <div class="score-wrap score-{{ score.level }}" style="padding:0;">
+            <div class="score-circle viewer-score-circle" id="scoreCircle" data-score="{{ score.score }}">
+                <div class="score-text">
+                    <div class="score-value" style="font-size:54px;">{{ score.score }}</div>
+                    <div class="score-label">{% if lang == 'en' %}out of 100{% else %}sur 100{% endif %}</div>
+                </div>
+            </div>
+        </div>
+        <div class="hero-message">
+            {% if score.level == 'good' %}
+                <span class="hero-badge">✓ {% if lang == 'en' %}Good security level{% else %}Bon niveau de sécurité{% endif %}</span>
+                <h2>{% if lang == 'en' %}Your company is well protected{% else %}Votre entreprise est bien protégée{% endif %}</h2>
+            {% elif score.level == 'medium' %}
+                <span class="hero-badge" style="background:rgba(234,179,8,0.2);color:#fcd34d;">⚠ {% if lang == 'en' %}To monitor{% else %}À surveiller{% endif %}</span>
+                <h2>{% if lang == 'en' %}Some points need attention{% else %}Quelques points méritent attention{% endif %}</h2>
+            {% else %}
+                <span class="hero-badge" style="background:rgba(239,68,68,0.2);color:#fca5a5;">✗ {% if lang == 'en' %}Critical{% else %}Critique{% endif %}</span>
+                <h2>{% if lang == 'en' %}Immediate action recommended{% else %}Action immédiate recommandée{% endif %}</h2>
+            {% endif %}
+            <p>
+                {% if lang == 'en' %}
+                    Our system automatically detected and blocked {{ blocked_week }} attack attempt(s) on your infrastructure. Your security team has all the tools to ensure business continuity.
+                {% else %}
+                    Notre système a détecté et bloqué automatiquement {{ blocked_week }} tentative(s) d'attaque sur votre infrastructure. Votre équipe de sécurité dispose de tous les outils pour assurer la continuité de votre activité.
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    <!-- 3 KPI business -->
+    <div class="grid-3">
+        <div class="summary-card protected">
+            <div class="summary-icon">🛡️</div>
+            <div class="summary-value">{{ blocked_week }}</div>
+            <div class="summary-label">{% if lang == 'en' %}Attacks blocked{% else %}Attaques bloquées{% endif %}</div>
+            <div class="summary-sub">{% if lang == 'en' %}total{% else %}au total{% endif %}</div>
+        </div>
+        <div class="summary-card blocked">
+            <div class="summary-icon">🚫</div>
+            <div class="summary-value">{{ compromations }}</div>
+            <div class="summary-label">{% if lang == 'en' %}Compromises{% else %}Compromissions{% endif %}</div>
+            <div class="summary-sub">{% if lang == 'en' %}critical incidents{% else %}incidents critiques{% endif %}</div>
+        </div>
+        <div class="summary-card uptime">
+            <div class="summary-icon">⚡</div>
+            <div class="summary-value">99.8%</div>
+            <div class="summary-label">{% if lang == 'en' %}System availability{% else %}Disponibilité système{% endif %}</div>
+            <div class="summary-sub">{% if lang == 'en' %}last 7 days{% else %}7 derniers jours{% endif %}</div>
+        </div>
+    </div>
+
+    <!-- Évolution des menaces -->
+    <div class="widget">
+        <div class="widget-title">📈 {% if lang == 'en' %}Threat evolution — last 7 days{% else %}Évolution des menaces — 7 derniers jours{% endif %}</div>
+        <canvas id="chart7days" height="80"></canvas>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/chart.umd.js' %}"></script>
+<script>
+(function () {
+    var ctx = document.getElementById('chart7days');
+    if (!ctx || typeof Chart === 'undefined') return;
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ chart_labels|safe }},
+            datasets: [{
+                data: {{ chart_data|safe }},
+                backgroundColor: 'rgba(167, 139, 250, 0.7)',
+                borderRadius: 6,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.1)' } },
+                x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+            }
+        }
+    });
+})();
+(function () {
+    var el = document.getElementById('scoreCircle');
+    if (!el) return;
+    var score = parseInt(el.dataset.score, 10);
+    var color = score >= 80 ? '#22c55e' : (score >= 50 ? '#eab308' : '#ef4444');
+    el.style.background = 'conic-gradient(' + color + ' 0% ' + score + '%, rgba(255,255,255,0.1) ' + score + '% 100%)';
+})();
+setTimeout(function () { window.location.reload(); }, 30000);
+</script>
+{% endblock %}

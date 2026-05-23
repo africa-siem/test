@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ t.audit_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">🕐 {{ t.audit_title }}</div>
+    <div class="page-subtitle">{{ total }} {{ t.results_total }}</div>
+
+    <form method="get" class="filters-bar">
+        <div class="filter-field">
+            <label>{% if lang == 'en' %}Category{% else %}Catégorie{% endif %}</label>
+            <select name="category">
+                <option value="">{{ t.filter_all }}</option>
+                {% for c in categories %}<option value="{{ c }}" {% if f_category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="filter-field" style="flex:1;">
+            <label>{{ t.col_user }}</label>
+            <input type="text" name="email" value="{{ f_email }}" placeholder="email@..." style="width:100%;">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" style="width:auto;">{{ t.filter_apply }}</button>
+        <a href="{% url 'audit_log' %}" class="btn btn-secondary btn-sm">{{ t.filter_reset }}</a>
+    </form>
+
+    {% if logs %}
+    <table class="data-table">
+        <thead><tr>
+            <th>{{ t.col_date }}</th><th>{{ t.col_user }}</th><th>{{ t.col_event }}</th>
+            <th>{{ t.col_target }}</th><th>{{ t.col_status }}</th>
+        </tr></thead>
+        <tbody>
+        {% for l in logs %}
+            <tr>
+                <td style="color:var(--text-muted);white-space:nowrap;">{{ l.performed_at|slice:"0:19" }}</td>
+                <td>{{ l.user_email|default:"système" }}</td>
+                <td>{{ l.action }}</td>
+                <td style="color:var(--text-muted);">{{ l.target_table|default:"—" }}{% if l.target_id %} #{{ l.target_id }}{% endif %}</td>
+                <td>{% if l.status == 'SUCCESS' %}<span class="badge-yes">✓</span>{% else %}<span class="badge-no">{{ l.status }}</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="pagination">
+        <span>{{ t.page_of }} {{ page }} / {{ total_pages }}</span>
+        <div style="display:flex;gap:8px;">
+            <a href="?page={{ prev_page }}&category={{ f_category }}&email={{ f_email }}" class="{% if not has_prev %}disabled{% endif %}">← {{ t.previous }}</a>
+            <a href="?page={{ next_page }}&category={{ f_category }}&email={{ f_email }}" class="{% if not has_next %}disabled{% endif %}">{{ t.next }} →</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty-hint">{{ t.no_audit }}</div></div>
+    {% endif %}
+{% endblock %}

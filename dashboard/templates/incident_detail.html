@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ t.incident_detail }} #{{ i.id }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <a href="{% url 'incidents_list' %}" style="color:var(--accent);text-decoration:none;font-size:13px;">← {{ t.back_to_list }}</a>
+
+    <div class="detail-header" style="margin-top:14px;">
+        <span class="badge-sev {{ i.severity }}" style="font-size:13px;padding:5px 12px;">{{ i.severity }}</span>
+        <span class="page-title" style="margin:0;">{{ i.title }}</span>
+        <span class="status-badge status-{{ i.status }}">{{ i.status }}</span>
+    </div>
+
+    <div class="detail-grid">
+        <div>
+            <div class="card">
+                <h3>🐛 {{ t.incident_detail }} #{{ i.id }}</h3>
+                <p style="line-height:1.6;">{{ i.description|default:"—" }}</p>
+                <div class="detail-meta">
+                    <div class="meta-item"><span class="meta-label">{{ t.correlated_alerts }}</span><strong>{{ i.alert_count }}</strong></div>
+                    <div class="meta-item"><span class="meta-label">{{ t.col_time }}</span>{{ i.created_at|slice:"0:16" }}</div>
+                </div>
+            </div>
+
+            {% if i.alerts %}
+            <div class="card">
+                <h3>🔗 {{ t.correlated_alerts }}</h3>
+                <table class="mini-table">
+                    <thead><tr><th>{{ t.col_time }}</th><th>{{ t.col_severity }}</th><th>{{ t.col_title }}</th><th>{{ t.col_ip }}</th></tr></thead>
+                    <tbody>
+                    {% for a in i.alerts %}
+                    <tr>
+                        <td style="color:var(--text-muted);">{{ a.created_at|slice:"0:16" }}</td>
+                        <td><span class="badge-sev {{ a.severity }}">{{ a.severity }}</span></td>
+                        <td><a class="row-link" href="{% url 'alert_detail' a.id %}">{{ a.title|truncatechars:34 }}</a></td>
+                        <td class="ip-mono">{{ a.src_ip|default:"—" }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+
+        <div>
+            {% if can_chat %}
+            <div class="card" style="position:sticky;top:20px;">
+                <h3>🤖 {{ t.ai_chat_title }}</h3>
+                <div class="chat-box">
+                    <div class="chat-messages" id="chatMessages">
+                        {% if chat_messages %}
+                            {% for m in chat_messages %}<div class="chat-msg {{ m.role }}">{{ m.content }}</div>{% endfor %}
+                        {% else %}
+                            <div class="chat-empty">{{ t.ai_chat_empty }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="chat-typing" id="chatTyping" style="display:none;">{{ t.ai_thinking }}</div>
+                    <div class="chat-input-row">
+                        <textarea id="chatInput" class="chat-input" rows="2" placeholder="{{ t.ai_chat_placeholder }}"></textarea>
+                        <button id="chatSend" class="chat-send">{{ t.ai_chat_send }}</button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+{% if can_chat %}
+<script>
+(function () {
+    var input = document.getElementById('chatInput');
+    var send = document.getElementById('chatSend');
+    var box = document.getElementById('chatMessages');
+    var typing = document.getElementById('chatTyping');
+    var url = "{% url 'incident_chat' i.id %}";
+    var csrf = "{{ csrf_token }}";
+    function addMsg(role, text) {
+        var empty = box.querySelector('.chat-empty'); if (empty) empty.remove();
+        var div = document.createElement('div'); div.className = 'chat-msg ' + role;
+        div.textContent = text; box.appendChild(div); box.scrollTop = box.scrollHeight;
+    }
+    function sendMessage() {
+        var text = input.value.trim(); if (!text) return;
+        addMsg('user', text); input.value = ''; send.disabled = true; typing.style.display = 'block';
+        var body = new URLSearchParams(); body.append('message', text); body.append('csrfmiddlewaretoken', csrf);
+        fetch(url, { method:'POST', headers:{'X-CSRFToken':csrf,'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+        .then(function(r){return r.json();})
+        .then(function(d){ typing.style.display='none'; send.disabled=false; addMsg('assistant', d.answer||'Erreur.'); })
+        .catch(function(){ typing.style.display='none'; send.disabled=false; addMsg('assistant', "Erreur de connexion."); });
+    }
+    send.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+    box.scrollTop = box.scrollHeight;
+})();
+</script>
+{% endif %}
+{% endblock %}

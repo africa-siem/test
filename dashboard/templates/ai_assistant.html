@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ t.ai_assistant_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">🤖 {{ t.ai_assistant_title }}</div>
+    <div class="page-subtitle">{% if lang == 'en' %}Ask the cybersecurity assistant anything{% else %}Posez vos questions à l'assistant cybersécurité{% endif %}</div>
+
+    <div class="assistant-layout">
+        <!-- Sidebar conversations -->
+        <div class="conv-sidebar">
+            <a href="{% url 'ai_assistant' %}" class="btn-new-conv">+ {{ t.new_conversation }}</a>
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:700;margin-bottom:10px;">{{ t.conversations_history }}</div>
+            {% if conversations %}
+                {% for conv in conversations %}
+                <a href="?conv={{ conv.id }}" class="conv-item {% if conv.id == active_conv %}active{% endif %}">
+                    {{ conv.title|default:"Conversation"|truncatechars:34 }}
+                    <span class="conv-date">{{ conv.updated_at|slice:"0:16" }}</span>
+                </a>
+                {% endfor %}
+            {% else %}
+                <div style="font-size:12px;color:var(--text-muted);padding:10px;">{{ t.no_conversations }}</div>
+            {% endif %}
+        </div>
+
+        <!-- Zone de chat -->
+        <div class="assistant-chat">
+            <div class="chat-messages" id="chatMessages" style="flex:1;">
+                {% if chat_messages %}
+                    {% for m in chat_messages %}<div class="chat-msg {{ m.role }}">{{ m.content }}</div>{% endfor %}
+                {% else %}
+                    <div class="chat-empty">{{ t.no_conversations }}</div>
+                {% endif %}
+            </div>
+            <div class="chat-typing" id="chatTyping" style="display:none;">{{ t.ai_thinking }}</div>
+            <div class="chat-input-row">
+                <textarea id="chatInput" class="chat-input" rows="2" placeholder="{{ t.ai_ask_anything }}"></textarea>
+                <button id="chatSend" class="chat-send">{{ t.ai_chat_send }}</button>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var input = document.getElementById('chatInput');
+    var send = document.getElementById('chatSend');
+    var box = document.getElementById('chatMessages');
+    var typing = document.getElementById('chatTyping');
+    var url = "{% url 'ai_assistant_chat' %}";
+    var csrf = "{{ csrf_token }}";
+    var convId = {% if active_conv %}{{ active_conv }}{% else %}null{% endif %};
+
+    function addMsg(role, text) {
+        var empty = box.querySelector('.chat-empty'); if (empty) empty.remove();
+        var div = document.createElement('div'); div.className = 'chat-msg ' + role;
+        div.textContent = text; box.appendChild(div); box.scrollTop = box.scrollHeight;
+    }
+    function sendMessage() {
+        var text = input.value.trim(); if (!text) return;
+        addMsg('user', text); input.value = ''; send.disabled = true; typing.style.display = 'block';
+        var body = new URLSearchParams();
+        body.append('message', text); body.append('csrfmiddlewaretoken', csrf);
+        if (convId) body.append('conv_id', convId);
+        fetch(url, { method:'POST', headers:{'X-CSRFToken':csrf,'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+        .then(function(r){return r.json();})
+        .then(function(d){
+            typing.style.display='none'; send.disabled=false;
+            addMsg('assistant', d.answer||'Erreur.');
+            if (d.conv_id && !convId) { convId = d.conv_id; }
+        })
+        .catch(function(){ typing.style.display='none'; send.disabled=false; addMsg('assistant', "Erreur de connexion."); });
+    }
+    send.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+    box.scrollTop = box.scrollHeight;
+})();
+</script>
+{% endblock %}

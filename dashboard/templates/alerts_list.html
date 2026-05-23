@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ t.alerts_title }} — {{ t.app_name }}{% endblock %}
+{% block content %}
+    <div class="page-title">{{ t.alerts_title }}</div>
+    <div class="page-subtitle">{{ total }} {{ t.results_total }}</div>
+
+    <!-- Filtres -->
+    <form method="get" class="filters-bar">
+        <div class="filter-field">
+            <label>{{ t.filter_severity }}</label>
+            <select name="severity">
+                <option value="">{{ t.filter_all }}</option>
+                {% for s in "CRITICAL,HIGH,MEDIUM,LOW,INFO"|cut:" "|slice:"0" %}{% endfor %}
+                <option value="CRITICAL" {% if f_severity == 'CRITICAL' %}selected{% endif %}>CRITICAL</option>
+                <option value="HIGH" {% if f_severity == 'HIGH' %}selected{% endif %}>HIGH</option>
+                <option value="MEDIUM" {% if f_severity == 'MEDIUM' %}selected{% endif %}>MEDIUM</option>
+                <option value="LOW" {% if f_severity == 'LOW' %}selected{% endif %}>LOW</option>
+                <option value="INFO" {% if f_severity == 'INFO' %}selected{% endif %}>INFO</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>{{ t.filter_status }}</label>
+            <select name="status">
+                <option value="">{{ t.filter_all }}</option>
+                <option value="NEW" {% if f_status == 'NEW' %}selected{% endif %}>NEW</option>
+                <option value="ACKNOWLEDGED" {% if f_status == 'ACKNOWLEDGED' %}selected{% endif %}>ACKNOWLEDGED</option>
+                <option value="INVESTIGATING" {% if f_status == 'INVESTIGATING' %}selected{% endif %}>INVESTIGATING</option>
+                <option value="RESOLVED" {% if f_status == 'RESOLVED' %}selected{% endif %}>RESOLVED</option>
+                <option value="FALSE_POSITIVE" {% if f_status == 'FALSE_POSITIVE' %}selected{% endif %}>FALSE_POSITIVE</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>{{ t.filter_source }}</label>
+            <select name="source">
+                <option value="">{{ t.filter_all }}</option>
+                <option value="wazuh" {% if f_source == 'wazuh' %}selected{% endif %}>Wazuh</option>
+                <option value="snort" {% if f_source == 'snort' %}selected{% endif %}>Snort</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>{{ t.filter_period }}</label>
+            <select name="period">
+                <option value="">{{ t.filter_all }}</option>
+                <option value="24h" {% if f_period == '24h' %}selected{% endif %}>24h</option>
+                <option value="7d" {% if f_period == '7d' %}selected{% endif %}>7j</option>
+                <option value="30d" {% if f_period == '30d' %}selected{% endif %}>30j</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label>{{ t.search_placeholder }}</label>
+            <input type="text" name="q" class="search-input" value="{{ f_search }}" placeholder="IP, titre...">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" style="width:auto;">{{ t.filter_apply }}</button>
+        <a href="{% url 'alerts_list' %}" class="btn btn-secondary btn-sm">{{ t.filter_reset }}</a>
+    </form>
+
+    <!-- Tableau -->
+    {% if alerts %}
+    <table class="data-table">
+        <thead><tr>
+            <th>{{ t.col_time }}</th>
+            <th>{{ t.col_severity }}</th>
+            <th>{{ t.col_title }}</th>
+            <th>{{ t.col_source }}</th>
+            <th>{{ t.col_ip }}</th>
+            <th>{{ t.col_count }}</th>
+            <th>{{ t.col_status }}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>
+        {% for a in alerts %}
+            <tr>
+                <td style="color:var(--text-muted);white-space:nowrap;">{{ a.created_at|slice:"0:16" }}</td>
+                <td><span class="badge-sev {{ a.severity }}">{{ a.severity }}</span></td>
+                <td>
+                    <a class="row-link" href="{% url 'alert_detail' a.id %}">{{ a.title|truncatechars:42 }}</a>
+                    {% for tag in a.tags_list %}
+                        {% if tag == 'honeypot' %}<span class="tag tag-honeypot">HONEYPOT</span>
+                        {% elif tag == 'correlated' %}<span class="tag tag-correlated">CORRÉLÉE</span>
+                        {% elif tag == 'unknown' %}<span class="tag tag-unknown">INCONNUE</span>{% endif %}
+                    {% endfor %}
+                    {% if a.incident_id %}<span class="tag tag-correlated">CORRÉLÉE</span>{% endif %}
+                </td>
+                <td><span class="source-badge">{{ a.source|default:"—" }}</span></td>
+                <td class="ip-mono">{{ a.src_ip|default:"—" }}{% if a.country_code %} <span style="color:var(--text-muted);">{{ a.country_code }}</span>{% endif %}</td>
+                <td>{{ a.event_count }}</td>
+                <td><span class="status-badge status-{{ a.status }}">{{ a.status }}</span></td>
+                <td><a class="row-link" href="{% url 'alert_detail' a.id %}" style="color:var(--accent);">{{ t.view_detail }} →</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <span>{{ t.page_of }} {{ page }} / {{ total_pages }}</span>
+        <div style="display:flex;gap:8px;">
+            <a href="?page={{ prev_page }}&severity={{ f_severity }}&status={{ f_status }}&source={{ f_source }}&period={{ f_period }}&q={{ f_search }}" class="{% if not has_prev %}disabled{% endif %}">← {{ t.previous }}</a>
+            <a href="?page={{ next_page }}&severity={{ f_severity }}&status={{ f_status }}&source={{ f_source }}&period={{ f_period }}&q={{ f_search }}" class="{% if not has_next %}disabled{% endif %}">{{ t.next }} →</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty-hint">{{ t.no_alerts }}</div></div>
+    {% endif %}
+{% endblock %}

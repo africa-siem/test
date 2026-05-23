@@ -1,0 +1,84 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="{{ lang }}" data-theme="{{ theme }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ t.app_name }}{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+</head>
+<body>
+<div class="layout">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="brand">
+            <h1>🛡️ {{ t.app_name }}</h1>
+            <small>{{ t.dashboard }}</small>
+        </div>
+        {% if current_user.is_viewer %}
+            <div class="role-banner viewer">👔 {{ t.role_VIEWER }}</div>
+        {% else %}
+            <div class="role-banner">{{ current_user.role.code }}</div>
+        {% endif %}
+
+        {% for section in menu %}
+            <div class="nav-section">{{ section.title }}</div>
+            {% for item in section.items %}
+                <a class="nav-item {% if item.url_name == active_page %}active{% endif %}"
+                   href="{% url item.url_name %}">
+                    <span>{{ item.label }}</span>
+                    {% if item.badge %}<span class="badge">{{ item.badge }}</span>{% endif %}
+                </a>
+            {% endfor %}
+        {% endfor %}
+    </aside>
+
+    <!-- MAIN -->
+    <div class="main">
+        <div class="topbar">
+            <input type="text" class="search" placeholder="🔍 {{ t.loading }}">
+            <div class="topbar-right">
+                <a class="lang-link {% if lang == 'fr' %}active{% endif %}" href="?lang=fr">FR</a>
+                <a class="lang-link {% if lang == 'en' %}active{% endif %}" href="?lang=en">EN</a>
+                <button class="icon-btn" id="theme-toggle" title="{{ t.theme }}">🌓</button>
+                <a class="icon-btn" href="#" title="Notifications">🔔</a>
+                <a class="user-chip" href="{% url 'profile' %}">
+                    <span class="avatar {% if current_user.is_viewer %}viewer{% endif %}">{{ current_user.initials }}</span>
+                    <span>
+                        <div style="font-size:13px;font-weight:700;">{{ current_user.full_name }}</div>
+                        <div style="font-size:11px;color:var(--text-muted);">{% if current_user.role.code == 'ADMIN' %}{{ t.role_ADMIN }}{% elif current_user.role.code == 'ANALYST' %}{{ t.role_ANALYST }}{% elif current_user.role.code == 'OPERATOR' %}{{ t.role_OPERATOR }}{% else %}{{ t.role_VIEWER }}{% endif %}</div>
+                    </span>
+                </a>
+                <a class="icon-btn" href="{% url 'logout' %}" title="{{ t.logout }}">⏻</a>
+            </div>
+        </div>
+
+        <div class="content">
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert {% if message.tags == 'error' %}alert-error{% else %}alert-success{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</div>
+
+<script>
+// Bascule de thème (sombre/clair) — mémorisée localement pour l'aperçu immédiat
+(function () {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+        var html = document.documentElement;
+        var current = html.getAttribute('data-theme');
+        var next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+    });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
