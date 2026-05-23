@@ -1,8 +1,0 @@
-__pycache__/
-*.py[cod]
-.sessions/
-staticfiles/
-testdb/
-*.sqlite3
-*.db
-.env
