@@ -30,13 +30,26 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# --- Détection d'une installation précédente --------------------------------
-if systemctl list-unit-files | grep -q "${SERVICE_NAME}.service"; then
-    warn "Une installation précédente du dashboard a été détectée."
-    warn "Elle va être arrêtée et remplacée proprement."
-    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
-    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+# --- Nettoyage complet de toute installation précédente ---------------------
+# On supprime TOUJOURS l'ancien code pour éviter les mélanges de versions.
+log "Nettoyage de l'installation précédente (si existante)..."
+systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+systemctl daemon-reload 2>/dev/null || true
+
+# Supprimer l'ancienne application (code + venv)
+if [[ -d "${APP_DIR}" ]]; then
+    warn "Suppression de l'ancien code dans ${APP_DIR}..."
+    rm -rf "${APP_DIR}"
 fi
+
+# Supprimer l'ancienne config Nginx
+rm -f "/etc/nginx/sites-enabled/${SERVICE_NAME}"
+rm -f "/etc/nginx/sites-available/${SERVICE_NAME}"
+nginx -s reload 2>/dev/null || true
+
+log "Nettoyage terminé — installation propre du nouveau code"
 
 # --- Vérification de la base partagée ---------------------------------------
 if [[ ! -f "${DB_PATH}" ]]; then
@@ -82,6 +95,10 @@ mkdir -p "${REPORTS_DIR}" "${SESSIONS_DIR}"
 # --- Clé secrète Django ------------------------------------------------------
 SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
 
+# --- IP du serveur (pour CSRF et ALLOWED_HOSTS) ------------------------------
+SERVER_IP="$(hostname -I | awk '{print $1}')"
+log "IP du serveur détectée : ${SERVER_IP}"
+
 # --- Création des tables de chat (idempotent) -------------------------------
 log "Création des tables de chat (si absentes)..."
 SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
@@ -118,6 +135,8 @@ Environment="SIEM_SESSION_PATH=${SESSIONS_DIR}"
 Environment="DJANGO_SECRET_KEY=${SECRET_KEY}"
 Environment="DJANGO_DEBUG=false"
 Environment="DJANGO_SECURE_COOKIES=false"
+Environment="DJANGO_ALLOWED_HOSTS=${SERVER_IP},localhost,127.0.0.1"
+Environment="DJANGO_TRUSTED_ORIGINS=http://${SERVER_IP},http://localhost"
 ExecStart=${APP_DIR}/venv/bin/gunicorn config.wsgi:application --bind ${BIND_ADDR} --workers 3 --timeout 120
 Restart=always
 RestartSec=5
