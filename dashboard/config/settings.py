@@ -7,7 +7,6 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- Sécurité -----------------------------------------------------------------
-# En production, la clé est lue depuis la variable d'environnement DJANGO_SECRET_KEY.
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
     "dev-key-CHANGEZ-MOI-en-production-siem-africa",
@@ -53,9 +52,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # --- Base de données ----------------------------------------------------------
-# IMPORTANT : on pointe vers la base SQLite PARTAGÉE avec l'agent (Module 2/3).
-# Le chemin par défaut correspond au déploiement sur la VM ; en développement
-# on peut le surcharger via la variable d'environnement SIEM_DB_PATH.
 SIEM_DB_PATH = os.environ.get(
     "SIEM_DB_PATH",
     "/var/lib/siem-africa/siem.db",
@@ -66,20 +62,13 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": SIEM_DB_PATH,
         "OPTIONS": {
-            # busy_timeout : attendre jusqu'à 5s si la base est verrouillée
-            # par l'agent, plutôt que d'échouer immédiatement.
             "timeout": 5,
             "init_command": "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;",
         },
     }
 }
 
-# Pas de base technique Django : on désactive les migrations sur la base partagée.
-# Les sessions sont stockées côté serveur dans un cache fichier (voir plus bas).
-
-# --- Sessions (sans table en base partagée) -----------------------------------
-# On stocke les sessions Django dans des fichiers, pour ne créer AUCUNE table
-# dans la base SQLite du Module 2.
+# --- Sessions -----------------------------------------------------------------
 SESSION_ENGINE = "django.contrib.sessions.backends.file"
 SESSION_FILE_PATH = os.environ.get(
     "SIEM_SESSION_PATH",
@@ -92,21 +81,18 @@ SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "false").lower()
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # --- CSRF ---------------------------------------------------------------------
-# CSRF_COOKIE_HTTPONLY doit rester False (défaut Django) pour que le middleware
-# puisse lire le token. Le mettre à True casse la validation derrière un proxy.
+# CSRF_COOKIE_HTTPONLY = False obligatoire : True casse la validation derriere Nginx
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# Origines de confiance pour les requêtes POST derrière Nginx (Django 4.x+).
-# On lit depuis l'env pour éviter de coder l'IP en dur.
+# CSRF_TRUSTED_ORIGINS obligatoire avec Django 4.x+ derriere un proxy
 _trusted = os.environ.get("DJANGO_TRUSTED_ORIGINS", "")
 if _trusted:
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted.split(",") if o.strip()]
 else:
-    # Fallback : accepter toutes les origines HTTP/HTTPS locales.
     CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
 
-# --- Validation des mots de passe (la nôtre est dans core/auth.py) ------------
+# --- Mots de passe ------------------------------------------------------------
 AUTH_PASSWORD_VALIDATORS = []
 
 # --- Internationalisation -----------------------------------------------------
@@ -122,5 +108,8 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Crée le dossier de sessions s'il n'existe pas
-os.makedirs(SESSION_FILE_PATH, exist_ok=True)
+# Créer le dossier sessions au démarrage (tolère l'absence de permissions)
+try:
+    os.makedirs(SESSION_FILE_PATH, exist_ok=True)
+except PermissionError:
+    pass
