@@ -87,13 +87,24 @@ SESSION_FILE_PATH = os.environ.get(
 )
 SESSION_COOKIE_NAME = "siem_session"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SECURE_COOKIES", "false").lower() == "true"
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # --- CSRF ---------------------------------------------------------------------
-CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = "Strict"
+# CSRF_COOKIE_HTTPONLY doit rester False (défaut Django) pour que le middleware
+# puisse lire le token. Le mettre à True casse la validation derrière un proxy.
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# Origines de confiance pour les requêtes POST derrière Nginx (Django 4.x+).
+# On lit depuis l'env pour éviter de coder l'IP en dur.
+_trusted = os.environ.get("DJANGO_TRUSTED_ORIGINS", "")
+if _trusted:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted.split(",") if o.strip()]
+else:
+    # Fallback : accepter toutes les origines HTTP/HTTPS locales.
+    CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
 
 # --- Validation des mots de passe (la nôtre est dans core/auth.py) ------------
 AUTH_PASSWORD_VALIDATORS = []
