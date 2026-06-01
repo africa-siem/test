@@ -2,12 +2,6 @@
 # ============================================================================
 # SIEM Africa — Installation du Dashboard (Module 4)
 # ============================================================================
-# Installe le dashboard Django comme service systemd, servi par Gunicorn
-# derrière Nginx. Pointe sur la base SQLite partagée avec l'agent (Module 3).
-#
-# Usage :   sudo bash install_dashboard.sh
-# ============================================================================
-
 set -euo pipefail
 
 # --- Configuration ----------------------------------------------------------
@@ -23,52 +17,40 @@ NGINX_PORT="80"
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-err()  { echo -e "${RED}[x]${NC} $1"; }
+err()  { echo -e "${RED}[x]${NC} $1"; exit 1; }
 
 if [[ $EUID -ne 0 ]]; then
     err "Ce script doit être lancé en root (sudo)."
-    exit 1
 fi
 
-# --- Nettoyage complet de toute installation précédente ---------------------
-# On supprime TOUJOURS l'ancien code pour éviter les mélanges de versions.
+# --- Nettoyage complet -------------------------------------------------------
 log "Nettoyage de l'installation précédente (si existante)..."
 systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
 rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
 systemctl daemon-reload 2>/dev/null || true
-
-# Supprimer l'ancienne application (code + venv)
 if [[ -d "${APP_DIR}" ]]; then
     warn "Suppression de l'ancien code dans ${APP_DIR}..."
     rm -rf "${APP_DIR}"
 fi
-
-# Supprimer l'ancienne config Nginx
 rm -f "/etc/nginx/sites-enabled/${SERVICE_NAME}"
 rm -f "/etc/nginx/sites-available/${SERVICE_NAME}"
 nginx -s reload 2>/dev/null || true
+log "Nettoyage terminé."
 
-log "Nettoyage terminé — installation propre du nouveau code"
-
-# --- Vérification de la base partagée ---------------------------------------
-if [[ ! -f "${DB_PATH}" ]]; then
-    err "Base de données introuvable : ${DB_PATH}"
-    err "Installez d'abord le Module 2 (base de données) et le Module 1."
-    exit 1
-fi
+# --- Vérification BDD --------------------------------------------------------
+[[ ! -f "${DB_PATH}" ]] && err "Base introuvable : ${DB_PATH} — installez M1 et M2 d'abord."
 log "Base de données partagée trouvée : ${DB_PATH}"
 
-# --- Dépendances système ----------------------------------------------------
+# --- Dépendances système -----------------------------------------------------
 log "Installation des dépendances système..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv python3-pip nginx >/dev/null
-# Réparation éventuelle d'apt
 dpkg --configure -a 2>/dev/null || true
 apt-get install -f -y -qq 2>/dev/null || true
 
-# --- Utilisateur dédié ------------------------------------------------------
+# --- Utilisateur et groupe dédiés --------------------------------------------
 if ! getent group "${APP_USER}" &>/dev/null; then
     groupadd --system "${APP_USER}"
 fi
@@ -77,7 +59,6 @@ if ! id "${APP_USER}" &>/dev/null; then
     useradd --system --no-create-home --shell /usr/sbin/nologin -g "${APP_USER}" "${APP_USER}"
 else
     log "Utilisateur ${APP_USER} déjà présent."
-    # S'assurer que l'utilisateur appartient bien au bon groupe
     usermod -g "${APP_USER}" "${APP_USER}" 2>/dev/null || true
 fi
 
@@ -97,28 +78,25 @@ python3 -m venv "${APP_DIR}/venv"
 # --- Dossiers de données -----------------------------------------------------
 mkdir -p "${REPORTS_DIR}" "${SESSIONS_DIR}"
 
-# --- Clé secrète Django ------------------------------------------------------
+# --- Clé secrète + IP serveur ------------------------------------------------
 SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
-
-# --- IP du serveur (pour CSRF et ALLOWED_HOSTS) ------------------------------
 SERVER_IP="$(hostname -I | awk '{print $1}')"
 log "IP du serveur détectée : ${SERVER_IP}"
 
-# --- Création des tables de chat (idempotent) -------------------------------
+# --- Tables de chat (idempotent) ---------------------------------------------
 log "Création des tables de chat (si absentes)..."
 SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
     "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" shell -c \
     "from core.chat_db import ensure_chat_tables; ensure_chat_tables(); print('Tables de chat OK')" \
     2>/dev/null || warn "Création des tables de chat reportée au premier démarrage."
 
-# --- Collecte des fichiers statiques ----------------------------------------
+# --- Fichiers statiques ------------------------------------------------------
 log "Collecte des fichiers statiques..."
 SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
     "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" collectstatic --noinput >/dev/null
 
 # --- Permissions -------------------------------------------------------------
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${REPORTS_DIR}" "${SESSIONS_DIR}"
-# L'utilisateur du dashboard doit pouvoir lire/écrire la base partagée
 chgrp "${APP_USER}" "${DB_PATH}" 2>/dev/null || true
 chmod g+rw "${DB_PATH}" 2>/dev/null || true
 
@@ -152,7 +130,7 @@ StandardError=journal
 WantedBy=multi-user.target
 UNIT
 
-# --- Configuration Nginx -----------------------------------------------------
+# --- Nginx -------------------------------------------------------------------
 log "Configuration de Nginx..."
 cat > "/etc/nginx/sites-available/${SERVICE_NAME}" <<NGINX
 server {
@@ -193,13 +171,10 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
     echo "============================================================"
     echo "  Dashboard SIEM Africa installé avec succès"
     echo "============================================================"
-    echo "  Accès        : http://<adresse-du-serveur>/"
-    echo "  Service      : systemctl status ${SERVICE_NAME}"
-    echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
-    echo "  Connexion    : avec le compte ADMIN créé à l'installation"
-    echo "                 du Module 2."
+    echo "  Accès     : http://${SERVER_IP}/"
+    echo "  Service   : systemctl status ${SERVICE_NAME}"
+    echo "  Logs      : journalctl -u ${SERVICE_NAME} -f"
     echo "============================================================"
 else
     err "Le service n'a pas démarré. Vérifiez : journalctl -u ${SERVICE_NAME}"
-    exit 1
 fi
