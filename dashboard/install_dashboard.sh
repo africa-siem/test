@@ -69,11 +69,16 @@ dpkg --configure -a 2>/dev/null || true
 apt-get install -f -y -qq 2>/dev/null || true
 
 # --- Utilisateur dédié ------------------------------------------------------
+if ! getent group "${APP_USER}" &>/dev/null; then
+    groupadd --system "${APP_USER}"
+fi
 if ! id "${APP_USER}" &>/dev/null; then
     log "Création de l'utilisateur système ${APP_USER}..."
-    useradd --system --no-create-home --shell /usr/sbin/nologin "${APP_USER}"
+    useradd --system --no-create-home --shell /usr/sbin/nologin -g "${APP_USER}" "${APP_USER}"
 else
     log "Utilisateur ${APP_USER} déjà présent."
+    # S'assurer que l'utilisateur appartient bien au bon groupe
+    usermod -g "${APP_USER}" "${APP_USER}" 2>/dev/null || true
 fi
 
 # --- Copie de l'application --------------------------------------------------
