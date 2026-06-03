@@ -158,11 +158,20 @@ fi
 PY_VERSION=$(python3 --version | cut -d' ' -f2)
 log_ok "Python $PY_VERSION"
 
-# venv module
+# venv + ensurepip + pip (un python3 'minimal' peut avoir le module venv mais pas ensurepip)
+NEEDED_PKGS=""
 if ! python3 -c "import venv" 2>/dev/null; then
-    log_warn "python3-venv non installé, installation..."
-    apt-get install -y python3-venv 2>&1 | tail -2
+    NEEDED_PKGS="$NEEDED_PKGS python3-venv"
 fi
+if ! python3 -c "import ensurepip" 2>/dev/null; then
+    # ensurepip est dans python3-venv sur Ubuntu mais parfois cassé sur images minimales
+    NEEDED_PKGS="$NEEDED_PKGS python3-venv python3-pip"
+fi
+if [ -n "$NEEDED_PKGS" ]; then
+    log_warn "Modules Python à installer :$NEEDED_PKGS"
+    apt-get install -y $NEEDED_PKGS 2>&1 | tail -3
+fi
+log_ok "venv + pip + ensurepip OK"
 
 # SQLite
 if ! command -v sqlite3 &>/dev/null; then
@@ -293,17 +302,50 @@ for env_file in /etc/siem-africa/mail.env /etc/siem-africa/agent.env; do
 done
 
 # ============================================================================
-# 5. Venv Python
+# 5. Venv Python (idempotent, avec fallback get-pip.py si ensurepip échoue)
 # ============================================================================
 log_step "Création du venv Python"
 
 cd "$AGENT_DIR"
-python3 -m venv venv 2>&1 | tail -2
+
+# Nettoyer un venv existant CASSÉ (présent mais sans pip)
+if [ -d "$AGENT_DIR/venv" ] && [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+    log_warn "venv existant sans pip détecté → suppression pour repartir propre"
+    rm -rf "$AGENT_DIR/venv"
+fi
+
+# Créer le venv si absent
+if [ ! -d "$AGENT_DIR/venv" ]; then
+    python3 -m venv venv 2>&1 | tail -3
+fi
+
+# Vérification python
 if [ ! -x "$AGENT_DIR/venv/bin/python" ]; then
-    log_err "Création venv échouée"
+    log_err "Création venv échouée : pas de python dans $AGENT_DIR/venv/bin/"
     exit 1
 fi
-log_ok "venv Python créé"
+
+# Fallback get-pip.py si ensurepip n'a pas installé pip dans le venv
+if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+    log_warn "pip absent du venv (ensurepip non fonctionnel) → fallback get-pip.py"
+    GETPIP_TMP=$(mktemp /tmp/get-pip.XXXXXX.py)
+    if curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$GETPIP_TMP"; then
+        "$AGENT_DIR/venv/bin/python" "$GETPIP_TMP" 2>&1 | tail -3
+        rm -f "$GETPIP_TMP"
+    else
+        log_err "Impossible de télécharger get-pip.py - vérifier la connexion réseau"
+        log_info "Réessayer manuellement :"
+        log_info "  curl https://bootstrap.pypa.io/get-pip.py | $AGENT_DIR/venv/bin/python"
+        exit 1
+    fi
+fi
+
+# Vérification finale
+if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
+    log_err "pip toujours absent après fallback - installation Python cassée"
+    exit 1
+fi
+log_ok "venv Python opérationnel (python + pip)"
 
 # Mise à jour pip
 "$AGENT_DIR/venv/bin/pip" install --upgrade pip 2>&1 | tail -1
@@ -649,11 +691,11 @@ echo "  ✓ Installation Agent complète"
 echo -e "═══════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "État du service :"
-echo "  ⚙️  siem-agent : $(systemctl is-active siem-agent)"
-echo "  📁 Code       : $AGENT_DIR"
-echo "  📋 Logs       : $LOG_DIR/agent.log"
-echo "  ⚙️  Config    : $AGENT_ENV"
-echo "  💾 Backups    : /var/backups/siem-africa/"
+echo "  siem-agent : $(systemctl is-active siem-agent)"
+echo "  Code       : $AGENT_DIR"
+echo "  Logs       : $LOG_DIR/agent.log"
+echo "  Config    : $AGENT_ENV"
+echo "  Backups    : /var/backups/siem-africa/"
 echo ""
 echo "Commandes utiles :"
 echo "  Status agent      : sudo systemctl status siem-agent"
