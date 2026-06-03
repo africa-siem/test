@@ -37,7 +37,7 @@ fi
 
 clear
 echo -e "${CYAN}═══════════════════════════════════════════════════════════"
-echo "  SIEM Africa - Module 3 - Installation Agent v5"
+echo "  SIEM Africa - Module 3 - Installation Agent"
 echo "  8 blocs (fondations + DB + watcher + processor + IA"
 echo "         + email + active response + workers cron)"
 echo -e "═══════════════════════════════════════════════════════════${NC}"
@@ -158,34 +158,11 @@ fi
 PY_VERSION=$(python3 --version | cut -d' ' -f2)
 log_ok "Python $PY_VERSION"
 
-# venv module - test robuste avec création réelle
+# venv module
 if ! python3 -c "import venv" 2>/dev/null; then
     log_warn "python3-venv non installé, installation..."
-    apt-get install -y python3-venv python3-full 2>&1 | tail -3
+    apt-get install -y python3-venv 2>&1 | tail -2
 fi
-
-# Vérifier qu'on peut RÉELLEMENT créer un venv (test à blanc)
-_test_venv=$(mktemp -d)
-if ! python3 -m venv "$_test_venv/test" 2>&1 | grep -qv "Error\|error"; then
-    # Si la création échoue silencieusement, le binaire python n'existera pas
-    if [ ! -x "$_test_venv/test/bin/python" ] || [ ! -x "$_test_venv/test/bin/pip" ]; then
-        log_warn "venv ne fonctionne pas correctement, installation des paquets manquants..."
-        apt-get install -y python3-venv python3-pip python3-full 2>&1 | tail -3
-
-        # Re-test
-        rm -rf "$_test_venv"
-        _test_venv=$(mktemp -d)
-        python3 -m venv "$_test_venv/test" 2>&1 | tail -3
-        if [ ! -x "$_test_venv/test/bin/pip" ]; then
-            log_err "Impossible de créer un venv Python fonctionnel"
-            log_err "Lancer manuellement : sudo apt install -y python3-venv python3-pip python3-full"
-            rm -rf "$_test_venv"
-            exit 1
-        fi
-    fi
-fi
-rm -rf "$_test_venv"
-log_ok "python3-venv fonctionnel"
 
 # SQLite
 if ! command -v sqlite3 &>/dev/null; then
@@ -321,38 +298,12 @@ done
 log_step "Création du venv Python"
 
 cd "$AGENT_DIR"
-python3 -m venv venv 2>&1 | tail -3
-
-# Vérification stricte : python ET pip doivent exister
+python3 -m venv venv 2>&1 | tail -2
 if [ ! -x "$AGENT_DIR/venv/bin/python" ]; then
-    log_err "Création venv échouée : binaire python absent"
-    log_err "Lancer : sudo apt install -y python3-venv python3-pip python3-full"
+    log_err "Création venv échouée"
     exit 1
 fi
-
-if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
-    log_warn "venv créé mais pip absent - bootstrap pip..."
-    "$AGENT_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1 | tail -3
-
-    if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
-        log_err "Impossible d'installer pip dans le venv"
-        log_err "Tentative de réinstallation des paquets manquants..."
-        apt-get install -y python3-pip python3-full 2>&1 | tail -3
-
-        # Recréer le venv from scratch
-        rm -rf "$AGENT_DIR/venv"
-        python3 -m venv "$AGENT_DIR/venv" 2>&1 | tail -3
-
-        if [ ! -x "$AGENT_DIR/venv/bin/pip" ]; then
-            log_err "Échec définitif. Lancer manuellement :"
-            log_err "  sudo apt install -y python3-venv python3-pip python3-full"
-            log_err "  Puis relancer ce script"
-            exit 1
-        fi
-    fi
-fi
-
-log_ok "venv Python opérationnel (python + pip)"
+log_ok "venv Python créé"
 
 # Mise à jour pip
 "$AGENT_DIR/venv/bin/pip" install --upgrade pip 2>&1 | tail -1
@@ -406,20 +357,65 @@ log_ok "Code copié et permissions ajustées"
 # ============================================================================
 log_step "Installation Ollama et modèles IA"
 
-# 6.5.1 Vérifier / installer Ollama
+# 6.5.1 Vérifier / installer Ollama (binaire ET service systemd)
+NEED_OLLAMA_INSTALL=0
+
+# Détection du service systemd
+OLLAMA_UNIT=""
+for path in /etc/systemd/system/ollama.service \
+            /lib/systemd/system/ollama.service \
+            /usr/lib/systemd/system/ollama.service; do
+    if [ -f "$path" ]; then
+        OLLAMA_UNIT="$path"
+        break
+    fi
+done
+
 if command -v ollama &>/dev/null; then
-    OLLAMA_VERSION=$(ollama --version 2>&1 | head -1)
-    log_ok "Ollama déjà installé : $OLLAMA_VERSION"
+    # Filtrer les warnings parasites (ex: "could not connect to a running instance")
+    OLLAMA_VERSION=$(ollama --version 2>/dev/null | grep -oE "version is [0-9.]+|version [0-9.]+|[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+    [ -z "$OLLAMA_VERSION" ] && OLLAMA_VERSION="(version inconnue)"
+
+    if [ -n "$OLLAMA_UNIT" ]; then
+        log_ok "Ollama installé : $OLLAMA_VERSION ($OLLAMA_UNIT)"
+    else
+        log_warn "Binaire ollama présent ($OLLAMA_VERSION) mais service systemd absent"
+        log_info "Réinstallation pour créer le service systemd..."
+        NEED_OLLAMA_INSTALL=1
+    fi
 else
     log_info "Ollama non détecté, installation en cours..."
+    NEED_OLLAMA_INSTALL=1
+fi
+
+if [ "$NEED_OLLAMA_INSTALL" -eq 1 ]; then
     log_info "(téléchargement ~200 MB, peut prendre quelques minutes)"
 
-    # Installation officielle Ollama
-    if curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -5; then
+    # Installation officielle Ollama (crée user 'ollama' + service systemd)
+    # Pas de pipe vers tail : on veut voir les erreurs en cas d'échec
+    if curl -fsSL https://ollama.com/install.sh | sh; then
         log_ok "Ollama installé"
+        systemctl daemon-reload 2>/dev/null || true
+
+        # Re-détecter le service après installation
+        for path in /etc/systemd/system/ollama.service \
+                    /lib/systemd/system/ollama.service \
+                    /usr/lib/systemd/system/ollama.service; do
+            if [ -f "$path" ]; then
+                OLLAMA_UNIT="$path"
+                break
+            fi
+        done
+
+        if [ -n "$OLLAMA_UNIT" ]; then
+            log_ok "Service systemd créé : $OLLAMA_UNIT"
+        else
+            log_warn "Service systemd toujours absent après installation"
+            log_warn "Installation Ollama incomplète - vérifier manuellement"
+        fi
     else
         log_warn "Installation Ollama échouée"
-        log_warn "L'agent fonctionnera sans IA - installer manuellement avec :"
+        log_warn "Réessayer manuellement :"
         log_warn "  curl -fsSL https://ollama.com/install.sh | sh"
     fi
 fi
@@ -432,32 +428,60 @@ if command -v ollama &>/dev/null; then
         log_info "Démarrage du service ollama..."
         systemctl enable ollama 2>&1 | tail -1
         systemctl start ollama
-        sleep 3
-        if systemctl is-active --quiet ollama 2>/dev/null; then
+
+        # Attendre jusqu'à 30 secondes que le service soit actif
+        OLLAMA_STARTED=0
+        for i in $(seq 1 10); do
+            sleep 3
+            if systemctl is-active --quiet ollama 2>/dev/null; then
+                OLLAMA_STARTED=1
+                break
+            fi
+            log_info "  Attente démarrage ollama... ($((i*3))s)"
+        done
+
+        if [ "$OLLAMA_STARTED" -eq 1 ]; then
             log_ok "Service ollama démarré"
         else
             log_warn "Service ollama n'a pas démarré - voir : systemctl status ollama"
         fi
     fi
 
-    # 6.5.3 Vérifier que l'API répond
-    log_info "Test de l'API Ollama (http://localhost:11434)..."
-    sleep 2
-    if curl -sf -m 5 http://localhost:11434/api/tags >/dev/null 2>&1; then
+    # 6.5.3 Attendre que l'API HTTP soit disponible (jusqu'à 60 secondes)
+    log_info "Attente de l'API Ollama (http://localhost:11434)..."
+    OLLAMA_API_READY=0
+    for i in $(seq 1 20); do
+        if curl -sf -m 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+            OLLAMA_API_READY=1
+            break
+        fi
+        sleep 3
+        log_info "  API pas encore prête... ($((i*3))s/60s)"
+    done
+
+    if [ "$OLLAMA_API_READY" -eq 1 ]; then
         log_ok "API Ollama répond"
 
         # 6.5.4 Lister les modèles existants
-        EXISTING_MODELS=$(curl -s http://localhost:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+        # Format retourné : "qwen2.5:3b" ou "qwen2.5:3b:Q4_K_M" selon la version
+        EXISTING_MODELS=$(curl -s http://localhost:11434/api/tags 2>/dev/null \
+            | grep -o '"name":"[^"]*"' \
+            | cut -d'"' -f4 \
+            | sed 's/:latest$//')
 
         # 6.5.5 Télécharger les modèles requis (~2-3 GB chacun)
         MODELS_TO_PULL="qwen2.5:3b llama3.2:3b"
         for model in $MODELS_TO_PULL; do
-            if echo "$EXISTING_MODELS" | grep -q "^${model}$"; then
+            # Comparer le préfixe du modèle (ignorer le suffixe de quantization)
+            MODEL_BASE=$(echo "$model" | cut -d: -f1)
+            MODEL_TAG=$(echo "$model" | cut -d: -f2)
+            if echo "$EXISTING_MODELS" | grep -qE "^${MODEL_BASE}:${MODEL_TAG}"; then
                 log_ok "Modèle $model déjà téléchargé"
             else
-                log_info "Téléchargement de $model (~2 GB)..."
-                log_info "  Cela peut prendre 5-15 minutes selon la connexion..."
-                if ollama pull "$model" 2>&1 | tail -3; then
+                log_info "Téléchargement de $model (~2-4 GB)..."
+                log_info "  Cela peut prendre 10-30 minutes selon la connexion..."
+                log_info "  (patience - ne pas interrompre)"
+                if ollama pull "$model"; then
                     log_ok "Modèle $model téléchargé"
                 else
                     log_warn "Téléchargement de $model échoué - réessayer manuellement :"
@@ -466,9 +490,9 @@ if command -v ollama &>/dev/null; then
             fi
         done
     else
-        log_warn "API Ollama ne répond pas - les modèles ne peuvent pas être téléchargés"
-        log_warn "Réessayer manuellement :"
-        log_warn "  sudo systemctl start ollama"
+        log_warn "API Ollama ne répond pas après 60 secondes"
+        log_warn "Vérifier le service : systemctl status ollama"
+        log_warn "Puis télécharger manuellement :"
         log_warn "  ollama pull qwen2.5:3b && ollama pull llama3.2:3b"
     fi
 else
