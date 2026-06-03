@@ -289,9 +289,29 @@ class DatabaseManager:
             return False
 
     def get_alert_by_id(self, alert_id):
+        """Récupère une alerte avec les champs enrichis de sa signature.
+
+        Inclut les colonnes sig_* (sig_description_fr, sig_remediation_fr, etc.)
+        qui servent de fallback quand l'enrichissement IA n'a pas eu lieu
+        (ex: Ollama indisponible) ou pour les signatures auto-créées dont
+        seule la BDD M2 connaît la vraie description.
+        """
         try:
             with self.cursor() as cur:
-                cur.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
+                cur.execute("""
+                    SELECT a.*,
+                           s.name           AS sig_name,
+                           s.description    AS sig_description,
+                           s.description_fr AS sig_description_fr,
+                           s.remediation    AS sig_remediation,
+                           s.remediation_fr AS sig_remediation_fr,
+                           s.references_url AS sig_references_url,
+                           s.cve_ids        AS sig_cve_ids,
+                           s.source         AS sig_source
+                    FROM alerts a
+                    LEFT JOIN signatures s ON a.signature_id = s.id
+                    WHERE a.id = ?
+                """, (alert_id,))
                 row = cur.fetchone()
                 return dict(row) if row else None
         except Exception as e:
