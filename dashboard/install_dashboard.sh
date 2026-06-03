@@ -1,18 +1,33 @@
 #!/usr/bin/env bash
 # ============================================================================
 # SIEM Africa — Installation du Dashboard (Module 4)
+#
+# Ce script :
+#   1. Vérifie les prérequis (BDD M2, groupe partagé siem-africa)
+#   2. Crée l'utilisateur siem-dashboard avec groupe primaire siem-africa
+#   3. Installe les dépendances système et le venv Python
+#   4. Copie le code, configure dossiers et permissions
+#   5. Crée les tables de chat (idempotent)
+#   6. Collecte les fichiers statiques
+#   7. Installe le service systemd + Nginx
+#   8. Append les credentials dans /root/siem_credentials.txt
+#
+# Usage : sudo bash install_dashboard.sh
 # ============================================================================
 set -euo pipefail
 
 # --- Configuration ----------------------------------------------------------
 APP_USER="siem-dashboard"
+SHARED_GROUP="siem-africa"
 APP_DIR="/opt/siem-africa/dashboard"
-DB_PATH="/var/lib/siem-africa/siem.db"
-REPORTS_DIR="/var/lib/siem-africa/reports"
-SESSIONS_DIR="/var/lib/siem-africa/sessions"
+DATA_DIR="/var/lib/siem-africa"
+DB_PATH="${DATA_DIR}/siem.db"
+REPORTS_DIR="${DATA_DIR}/reports"
+SESSIONS_DIR="${DATA_DIR}/sessions"
 SERVICE_NAME="siem-dashboard"
 BIND_ADDR="127.0.0.1:8000"
 NGINX_PORT="80"
+CREDENTIALS_FILE="/root/siem_credentials.txt"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[+]${NC} $1"; }
@@ -38,9 +53,14 @@ rm -f "/etc/nginx/sites-available/${SERVICE_NAME}"
 nginx -s reload 2>/dev/null || true
 log "Nettoyage terminé."
 
-# --- Vérification BDD --------------------------------------------------------
+# --- Vérification prérequis (BDD + groupe partagé) ---------------------------
 [[ ! -f "${DB_PATH}" ]] && err "Base introuvable : ${DB_PATH} — installez M1 et M2 d'abord."
 log "Base de données partagée trouvée : ${DB_PATH}"
+
+if ! getent group "${SHARED_GROUP}" &>/dev/null; then
+    err "Groupe partagé '${SHARED_GROUP}' introuvable — installez M1 et M2 d'abord."
+fi
+log "Groupe partagé '${SHARED_GROUP}' présent."
 
 # --- Dépendances système -----------------------------------------------------
 log "Installation des dépendances système..."
@@ -50,16 +70,19 @@ apt-get install -y -qq python3 python3-venv python3-pip nginx >/dev/null
 dpkg --configure -a 2>/dev/null || true
 apt-get install -f -y -qq 2>/dev/null || true
 
-# --- Utilisateur et groupe dédiés --------------------------------------------
-if ! getent group "${APP_USER}" &>/dev/null; then
-    groupadd --system "${APP_USER}"
-fi
+# --- Utilisateur (groupe primaire = siem-africa) -----------------------------
 if ! id "${APP_USER}" &>/dev/null; then
-    log "Création de l'utilisateur système ${APP_USER}..."
-    useradd --system --no-create-home --shell /usr/sbin/nologin -g "${APP_USER}" "${APP_USER}"
+    log "Création de l'utilisateur ${APP_USER} (groupe primaire : ${SHARED_GROUP})..."
+    useradd --system --no-create-home --shell /usr/sbin/nologin \
+        -g "${SHARED_GROUP}" "${APP_USER}"
 else
-    log "Utilisateur ${APP_USER} déjà présent."
-    usermod -g "${APP_USER}" "${APP_USER}" 2>/dev/null || true
+    log "Utilisateur ${APP_USER} déjà présent — synchronisation du groupe primaire..."
+    usermod -g "${SHARED_GROUP}" "${APP_USER}"
+    # Supprimer l'ancien groupe personnel s'il traîne (anciennes installations)
+    if getent group "${APP_USER}" &>/dev/null; then
+        groupdel "${APP_USER}" 2>/dev/null || \
+            warn "Groupe personnel '${APP_USER}' n'a pas pu être supprimé (références restantes)."
+    fi
 fi
 
 # --- Copie de l'application --------------------------------------------------
@@ -96,9 +119,13 @@ SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
     "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" collectstatic --noinput >/dev/null
 
 # --- Permissions -------------------------------------------------------------
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${REPORTS_DIR}" "${SESSIONS_DIR}"
-chgrp "${APP_USER}" "${DB_PATH}" 2>/dev/null || true
-chmod g+rw "${DB_PATH}" 2>/dev/null || true
+# Code et dossiers du dashboard : siem-dashboard:siem-africa
+chown -R "${APP_USER}:${SHARED_GROUP}" "${APP_DIR}" "${REPORTS_DIR}" "${SESSIONS_DIR}"
+# Dossiers d'écriture : rwx pour user et groupe, rien pour autres
+chmod -R u+rwX,g+rwX,o-rwx "${REPORTS_DIR}" "${SESSIONS_DIR}"
+# La BDD reste propriétaire à M2 (siem-db:siem-africa) — on n'y touche PAS.
+# Le user siem-dashboard accède en lecture/écriture via le groupe siem-africa.
+log "Permissions appliquées (BDD inchangée, dossiers du dashboard alignés sur ${SHARED_GROUP})."
 
 # --- Service systemd ---------------------------------------------------------
 log "Création du service systemd ${SERVICE_NAME}..."
@@ -110,8 +137,12 @@ After=network.target
 [Service]
 Type=simple
 User=${APP_USER}
-Group=${APP_USER}
+Group=${SHARED_GROUP}
 WorkingDirectory=${APP_DIR}
+# /run/siem-dashboard auto-créé/supprimé par systemd, sert de HOME à gunicorn
+RuntimeDirectory=siem-dashboard
+RuntimeDirectoryMode=0750
+Environment="HOME=/run/siem-dashboard"
 Environment="SIEM_DB_PATH=${DB_PATH}"
 Environment="SIEM_REPORTS_PATH=${REPORTS_DIR}"
 Environment="SIEM_SESSION_PATH=${SESSIONS_DIR}"
@@ -123,7 +154,7 @@ Environment="DJANGO_TRUSTED_ORIGINS=http://${SERVER_IP},http://localhost"
 ExecStart=${APP_DIR}/venv/bin/gunicorn config.wsgi:application --bind ${BIND_ADDR} --workers 3 --timeout 120
 Restart=always
 RestartSec=5
-StandardOutput=null
+StandardOutput=journal
 StandardError=journal
 
 [Install]
@@ -158,6 +189,28 @@ ln -sf "/etc/nginx/sites-available/${SERVICE_NAME}" "/etc/nginx/sites-enabled/${
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 nginx -t 2>/dev/null && systemctl reload nginx
 
+# --- Credentials -------------------------------------------------------------
+log "Enregistrement des credentials dans ${CREDENTIALS_FILE}..."
+touch "${CREDENTIALS_FILE}"
+chmod 600 "${CREDENTIALS_FILE}"
+# Append uniquement si la section n'existe pas déjà
+if ! grep -q "\[MODULE 4 - DASHBOARD\]" "${CREDENTIALS_FILE}" 2>/dev/null; then
+    cat >> "${CREDENTIALS_FILE}" <<CREDS
+
+[MODULE 4 - DASHBOARD]
+Installation date : $(date '+%Y-%m-%d %H:%M:%S')
+URL               : http://${SERVER_IP}/
+Service systemd   : ${SERVICE_NAME}
+App user          : ${APP_USER} (groupe : ${SHARED_GROUP})
+App directory     : ${APP_DIR}
+Reports directory : ${REPORTS_DIR}
+Sessions directory: ${SESSIONS_DIR}
+Django SECRET_KEY : ${SECRET_KEY}
+CREDS
+else
+    warn "Section [MODULE 4 - DASHBOARD] déjà présente — non écrasée."
+fi
+
 # --- Démarrage ---------------------------------------------------------------
 log "Démarrage du service..."
 systemctl daemon-reload
@@ -171,9 +224,10 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
     echo "============================================================"
     echo "  Dashboard SIEM Africa installé avec succès"
     echo "============================================================"
-    echo "  Accès     : http://${SERVER_IP}/"
-    echo "  Service   : systemctl status ${SERVICE_NAME}"
-    echo "  Logs      : journalctl -u ${SERVICE_NAME} -f"
+    echo "  Accès        : http://${SERVER_IP}/"
+    echo "  Service      : systemctl status ${SERVICE_NAME}"
+    echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
+    echo "  Credentials  : ${CREDENTIALS_FILE}"
     echo "============================================================"
 else
     err "Le service n'a pas démarré. Vérifiez : journalctl -u ${SERVICE_NAME}"
