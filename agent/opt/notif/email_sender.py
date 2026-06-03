@@ -3,6 +3,7 @@ SIEM Africa - Agent (Module 3) - notif/email_sender.py
 EmailSender : auto-découverte SMTP (BDD + /etc/siem-africa/smtp.env) + anti-spam + 4 types d'emails.
 """
 import os
+import json
 import logging
 from datetime import datetime
 
@@ -284,14 +285,46 @@ class EmailSender:
             lines.append(f"Protocole    : {alert['protocol']}")
         if alert.get("event_count", 1) > 1:
             lines.append(f"Occurrences  : {alert['event_count']}")
-        if alert.get("description"):
-            lines.append("")
-            lines.append(f"Description  : {alert['description'][:300]}")
 
-        if alert.get("ai_description"):
-            lines.extend(["", "ANALYSE IA", "-" * 60, alert["ai_description"][:500]])
-        if alert.get("ai_remediation"):
-            lines.extend(["", "RECOMMANDATIONS", "-" * 60, str(alert["ai_remediation"])[:500]])
+        # ----------------------------------------------------------------
+        # DESCRIPTION : cascade de fallback
+        # 1. ai_description (enrichissement IA Ollama, si dispo)
+        # 2. sig_description_fr (BDD - seeds enrichis FR)
+        # 3. sig_description    (BDD - description anglaise / brute)
+        # 4. alert.description  (description courte stockée sur l'alerte)
+        # ----------------------------------------------------------------
+        description = (alert.get("ai_description")
+                       or alert.get("sig_description_fr")
+                       or alert.get("sig_description")
+                       or alert.get("description"))
+        if description:
+            lines.extend(["", "DESCRIPTION", "-" * 60, str(description)[:800]])
+
+        # ----------------------------------------------------------------
+        # RECOMMANDATIONS : cascade de fallback
+        # 1. ai_remediation     (enrichissement IA Ollama)
+        # 2. sig_remediation_fr (BDD - seeds enrichis FR)
+        # 3. sig_remediation    (BDD - remediation brute)
+        # ----------------------------------------------------------------
+        recommendations = (alert.get("ai_remediation")
+                           or alert.get("sig_remediation_fr")
+                           or alert.get("sig_remediation"))
+        if recommendations:
+            lines.extend(["", "RECOMMANDATIONS", "-" * 60, str(recommendations)[:800]])
+
+        # ----------------------------------------------------------------
+        # RÉFÉRENCES : CVE et URL documentation (si la signature en a)
+        # ----------------------------------------------------------------
+        if alert.get("sig_cve_ids"):
+            try:
+                cves = json.loads(alert["sig_cve_ids"])
+                if cves:
+                    lines.append("")
+                    lines.append(f"CVE          : {', '.join(cves)}")
+            except (ValueError, TypeError):
+                pass
+        if alert.get("sig_references_url"):
+            lines.append(f"Documentation: {alert['sig_references_url']}")
 
         lines.extend([
             "", "=" * 60,
