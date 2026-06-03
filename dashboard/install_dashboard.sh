@@ -2,15 +2,14 @@
 # ============================================================================
 # SIEM Africa — Installation du Dashboard (Module 4)
 #
-# Ce script :
-#   1. Vérifie les prérequis (BDD M2, groupe partagé siem-africa)
-#   2. Crée l'utilisateur siem-dashboard avec groupe primaire siem-africa
-#   3. Installe les dépendances système et le venv Python
-#   4. Copie le code, configure dossiers et permissions
-#   5. Crée les tables de chat (idempotent)
-#   6. Collecte les fichiers statiques
-#   7. Installe le service systemd + Nginx
-#   8. Append les credentials dans /root/siem_credentials.txt
+# Corrections incluses :
+#   - User siem-dashboard dans le groupe primaire siem-africa
+#   - BDD jamais touchée en propriétaire, mais permissions RÉPARÉES si cassées
+#     par une install précédente (chgrp siem-dashboard sur .db / .db-shm / .db-wal)
+#   - Group=siem-africa + RuntimeDirectory dans systemd (fini /home/siem-dashboard)
+#   - collectstatic non bloquant (n'avorte plus l'install si erreur)
+#   - Tables chat créées via sqlite3 direct (pas Django shell, plus robuste)
+#   - Test HTTP de fin pour confirmer que ça répond vraiment
 #
 # Usage : sudo bash install_dashboard.sh
 # ============================================================================
@@ -38,6 +37,15 @@ if [[ $EUID -ne 0 ]]; then
     err "Ce script doit être lancé en root (sudo)."
 fi
 
+# --- Vérification prérequis --------------------------------------------------
+[[ ! -f "${DB_PATH}" ]] && err "Base introuvable : ${DB_PATH} — installez M1 et M2 d'abord."
+log "Base de données partagée trouvée : ${DB_PATH}"
+
+if ! getent group "${SHARED_GROUP}" &>/dev/null; then
+    err "Groupe partagé '${SHARED_GROUP}' introuvable — installez M1 et M2 d'abord."
+fi
+log "Groupe partagé '${SHARED_GROUP}' présent."
+
 # --- Nettoyage complet -------------------------------------------------------
 log "Nettoyage de l'installation précédente (si existante)..."
 systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
@@ -51,22 +59,12 @@ fi
 rm -f "/etc/nginx/sites-enabled/${SERVICE_NAME}"
 rm -f "/etc/nginx/sites-available/${SERVICE_NAME}"
 nginx -s reload 2>/dev/null || true
-log "Nettoyage terminé."
-
-# --- Vérification prérequis (BDD + groupe partagé) ---------------------------
-[[ ! -f "${DB_PATH}" ]] && err "Base introuvable : ${DB_PATH} — installez M1 et M2 d'abord."
-log "Base de données partagée trouvée : ${DB_PATH}"
-
-if ! getent group "${SHARED_GROUP}" &>/dev/null; then
-    err "Groupe partagé '${SHARED_GROUP}' introuvable — installez M1 et M2 d'abord."
-fi
-log "Groupe partagé '${SHARED_GROUP}' présent."
 
 # --- Dépendances système -----------------------------------------------------
 log "Installation des dépendances système..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip nginx >/dev/null
+apt-get install -y -qq python3 python3-venv python3-pip nginx sqlite3 >/dev/null
 dpkg --configure -a 2>/dev/null || true
 apt-get install -f -y -qq 2>/dev/null || true
 
@@ -78,12 +76,14 @@ if ! id "${APP_USER}" &>/dev/null; then
 else
     log "Utilisateur ${APP_USER} déjà présent — synchronisation du groupe primaire..."
     usermod -g "${SHARED_GROUP}" "${APP_USER}"
-    # Supprimer l'ancien groupe personnel s'il traîne (anciennes installations)
     if getent group "${APP_USER}" &>/dev/null; then
         groupdel "${APP_USER}" 2>/dev/null || \
-            warn "Groupe personnel '${APP_USER}' n'a pas pu être supprimé (références restantes)."
+            warn "Groupe personnel '${APP_USER}' n'a pas pu être supprimé (non bloquant)."
     fi
 fi
+
+USER_GROUPS=$(id -nG "${APP_USER}" 2>/dev/null || echo "?")
+log "Groupes de ${APP_USER} : ${USER_GROUPS}"
 
 # --- Copie de l'application --------------------------------------------------
 log "Copie de l'application vers ${APP_DIR}..."
@@ -95,7 +95,9 @@ cp -r "${SCRIPT_DIR}/." "${APP_DIR}/"
 log "Création de l'environnement virtuel Python..."
 python3 -m venv "${APP_DIR}/venv"
 "${APP_DIR}/venv/bin/pip" install --quiet --upgrade pip
-"${APP_DIR}/venv/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
+if [[ -f "${APP_DIR}/requirements.txt" ]]; then
+    "${APP_DIR}/venv/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
+fi
 "${APP_DIR}/venv/bin/pip" install --quiet gunicorn reportlab openpyxl
 
 # --- Dossiers de données -----------------------------------------------------
@@ -106,26 +108,73 @@ SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')"
 SERVER_IP="$(hostname -I | awk '{print $1}')"
 log "IP du serveur détectée : ${SERVER_IP}"
 
-# --- Tables de chat (idempotent) ---------------------------------------------
-log "Création des tables de chat (si absentes)..."
-SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
-    "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" shell -c \
-    "from core.chat_db import ensure_chat_tables; ensure_chat_tables(); print('Tables de chat OK')" \
-    2>/dev/null || warn "Création des tables de chat reportée au premier démarrage."
+# ============================================================================
+# RÉPARATION CRITIQUE : permissions BDD
+# ----------------------------------------------------------------------------
+# Si une install précédente a fait `chgrp siem-dashboard /var/lib/siem-africa/siem.db`,
+# la BDD n'appartient plus au groupe partagé → le dashboard ne peut pas la lire.
+# Ici on force le bon groupe sur la BDD ET sur les fichiers SQLite -wal/-shm.
+# ============================================================================
+log "Vérification/réparation des permissions BDD..."
+chgrp "${SHARED_GROUP}" "${DB_PATH}" 2>/dev/null || warn "chgrp BDD échoué (non bloquant)"
+chmod g+rw "${DB_PATH}" 2>/dev/null || true
+for ext in "-shm" "-wal" "-journal"; do
+    if [[ -f "${DB_PATH}${ext}" ]]; then
+        chgrp "${SHARED_GROUP}" "${DB_PATH}${ext}" 2>/dev/null || true
+        chmod g+rw "${DB_PATH}${ext}" 2>/dev/null || true
+    fi
+done
+chmod g+rx "${DATA_DIR}" 2>/dev/null || true
 
-# --- Fichiers statiques ------------------------------------------------------
-log "Collecte des fichiers statiques..."
-SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
-    "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" collectstatic --noinput >/dev/null
+# Test concret : le user APP_USER peut-il lire la BDD ?
+if sudo -u "${APP_USER}" -g "${SHARED_GROUP}" test -r "${DB_PATH}"; then
+    log "${APP_USER} peut lire la BDD ✓"
+else
+    err "${APP_USER} ne peut PAS lire ${DB_PATH} - permissions à corriger manuellement"
+fi
 
-# --- Permissions -------------------------------------------------------------
-# Code et dossiers du dashboard : siem-dashboard:siem-africa
+# --- Permissions des dossiers du dashboard -----------------------------------
 chown -R "${APP_USER}:${SHARED_GROUP}" "${APP_DIR}" "${REPORTS_DIR}" "${SESSIONS_DIR}"
-# Dossiers d'écriture : rwx pour user et groupe, rien pour autres
 chmod -R u+rwX,g+rwX,o-rwx "${REPORTS_DIR}" "${SESSIONS_DIR}"
-# La BDD reste propriétaire à M2 (siem-db:siem-africa) — on n'y touche PAS.
-# Le user siem-dashboard accède en lecture/écriture via le groupe siem-africa.
-log "Permissions appliquées (BDD inchangée, dossiers du dashboard alignés sur ${SHARED_GROUP})."
+log "Permissions dashboard appliquées."
+
+# --- Tables de chat (idempotent, via sqlite3 direct - sans Django) ----------
+log "Création des tables de chat (si absentes)..."
+sqlite3 "${DB_PATH}" <<'SQL' || warn "Création des tables de chat reportée au premier démarrage."
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    title        TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    role            TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+    content         TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chat_conv_user ON chat_conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_msg_conv  ON chat_messages(conversation_id);
+SQL
+
+# --- Fichiers statiques (non bloquant) ---------------------------------------
+log "Collecte des fichiers statiques..."
+if SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
+   "${APP_DIR}/venv/bin/python" "${APP_DIR}/manage.py" collectstatic --noinput >/dev/null 2>&1; then
+    log "Fichiers statiques collectés."
+else
+    warn "collectstatic a échoué — non bloquant, dashboard fonctionnera quand même."
+    warn "Relancez plus tard si besoin :"
+    warn "  cd ${APP_DIR} && venv/bin/python manage.py collectstatic --noinput"
+fi
+
+# S'assurer que staticfiles appartient aussi au bon user après collectstatic
+if [[ -d "${APP_DIR}/staticfiles" ]]; then
+    chown -R "${APP_USER}:${SHARED_GROUP}" "${APP_DIR}/staticfiles"
+fi
 
 # --- Service systemd ---------------------------------------------------------
 log "Création du service systemd ${SERVICE_NAME}..."
@@ -193,7 +242,6 @@ nginx -t 2>/dev/null && systemctl reload nginx
 log "Enregistrement des credentials dans ${CREDENTIALS_FILE}..."
 touch "${CREDENTIALS_FILE}"
 chmod 600 "${CREDENTIALS_FILE}"
-# Append uniquement si la section n'existe pas déjà
 if ! grep -q "\[MODULE 4 - DASHBOARD\]" "${CREDENTIALS_FILE}" 2>/dev/null; then
     cat >> "${CREDENTIALS_FILE}" <<CREDS
 
@@ -211,24 +259,35 @@ else
     warn "Section [MODULE 4 - DASHBOARD] déjà présente — non écrasée."
 fi
 
-# --- Démarrage ---------------------------------------------------------------
+# --- Démarrage + vérification HTTP -------------------------------------------
 log "Démarrage du service..."
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
 systemctl start "${SERVICE_NAME}"
 
-sleep 3
-if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    log "Le dashboard est actif."
-    echo ""
-    echo "============================================================"
-    echo "  Dashboard SIEM Africa installé avec succès"
-    echo "============================================================"
-    echo "  Accès        : http://${SERVER_IP}/"
-    echo "  Service      : systemctl status ${SERVICE_NAME}"
-    echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
-    echo "  Credentials  : ${CREDENTIALS_FILE}"
-    echo "============================================================"
-else
-    err "Le service n'a pas démarré. Vérifiez : journalctl -u ${SERVICE_NAME}"
+sleep 5
+
+if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+    journalctl -u "${SERVICE_NAME}" -n 30 --no-pager
+    err "Service non actif — voir trace ci-dessus."
 fi
+
+# Test HTTP réel
+log "Test HTTP du dashboard..."
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1/" || echo "000")
+if [[ "${HTTP_CODE}" =~ ^(200|301|302)$ ]]; then
+    log "Dashboard répond OK (HTTP ${HTTP_CODE})"
+else
+    warn "Le dashboard a répondu HTTP ${HTTP_CODE} — voir les logs :"
+    warn "  journalctl -u ${SERVICE_NAME} -n 50"
+fi
+
+echo ""
+echo "============================================================"
+echo "  Dashboard SIEM Africa installé"
+echo "============================================================"
+echo "  Accès        : http://${SERVER_IP}/"
+echo "  Service      : systemctl status ${SERVICE_NAME}"
+echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
+echo "  Credentials  : ${CREDENTIALS_FILE}"
+echo "============================================================"
