@@ -3,6 +3,7 @@
 Strategie : inotify si disponible, fallback polling 5s sinon.
 """
 import json
+import re
 import os
 import time
 from pathlib import Path
@@ -49,23 +50,47 @@ def _parse_alert(line):
     rule = data.get("rule") or {}
     agent = data.get("agent") or {}
     src = data.get("data", {})
+    decoder = data.get("decoder") or {}
+    full_log = data.get("full_log") or ""
 
-    rule_id = str(rule.get("id") or "")
+    # ------------------------------------------------------------------
+    # Cas Snort relayé par Wazuh : la regle Wazuh est generique
+    # ("IDS event.", id 20101) et le VRAI SID Snort est dans data.id
+    # au format "gid:sid:rev" (ex "1:1000042:1"). On remappe vers la
+    # source snort + le SID reel, pour retrouver la signature en BDD.
+    # ------------------------------------------------------------------
+    is_snort = (decoder.get("name") == "snort"
+                or decoder.get("parent") == "snort"
+                or "snort" in (str(rule.get("groups")) or "").lower())
+    data_id = str(src.get("id") or "")
+    sid_match = re.match(r"^\d+:(\d+):\d+$", data_id)
+
+    if is_snort and sid_match:
+        source = "snort"
+        rule_id = sid_match.group(1)               # le SID central
+        # Titre propre extrait du full_log : "... [1:SID:rev] MESSAGE [**] ..."
+        msg = re.search(r"\[\d+:\d+:\d+\]\s+(.+?)\s+\[\*\*\]", full_log)
+        title = msg.group(1).strip() if msg else (rule.get("description") or f"Snort {rule_id}")
+    else:
+        source = "wazuh"
+        rule_id = str(rule.get("id") or "")
+        title = rule.get("description") or f"Wazuh rule {rule_id}"
+
     if not rule_id:
         return None
 
     return {
-        "source": "wazuh",
+        "source": source,
         "rule_id": rule_id,
         "raw_level": rule.get("level"),
-        "raw_message": data.get("full_log") or rule.get("description") or "",
+        "raw_message": full_log or rule.get("description") or "",
         "src_ip": src.get("srcip") or src.get("src_ip"),
         "dst_ip": src.get("dstip") or src.get("dst_ip"),
         "src_port": src.get("srcport"),
         "dst_port": src.get("dstport"),
         "protocol": src.get("protocol"),
         "agent_name": agent.get("name"),
-        "title": rule.get("description") or f"Wazuh rule {rule_id}",
+        "title": title,
         "raw_event": data,
     }
 
