@@ -17,7 +17,9 @@ def dashboard_context(request):
         def __getitem__(self, key):
             return translate(key, lang)
 
-    theme = user.theme_preference if user else "dark"
+    # Clair par défaut (direction "Ink"). La préférence utilisateur prime ;
+    # "auto" ou l'absence de préférence retombe sur le clair.
+    theme = (user.theme_preference if user else None) or "light"
 
     return {
         "current_user": user,

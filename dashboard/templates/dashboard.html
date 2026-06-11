@@ -10,7 +10,7 @@
     <!-- 4 compteurs de sévérité -->
     <div class="grid-4">
         <div class="stat-card critical">
-            <div class="stat-label">⚠️ Critical</div>
+            <div class="stat-label">{% if lang == 'en' %}Critical{% else %}Critiques{% endif %}</div>
             <div class="stat-value">{{ sev.CRITICAL }}</div>
             <div class="stat-trend">
                 {% if trend_critical.dir == 'up' %}<span class="trend-up">↑ +{{ trend_critical.diff }}</span>
@@ -19,7 +19,7 @@
             </div>
         </div>
         <div class="stat-card high">
-            <div class="stat-label">🔴 High</div>
+            <div class="stat-label">{% if lang == 'en' %}High{% else %}Hautes{% endif %}</div>
             <div class="stat-value">{{ sev.HIGH }}</div>
             <div class="stat-trend">
                 {% if trend_high.dir == 'up' %}<span class="trend-up">↑ +{{ trend_high.diff }}</span>
@@ -28,7 +28,7 @@
             </div>
         </div>
         <div class="stat-card medium">
-            <div class="stat-label">🟡 Medium</div>
+            <div class="stat-label">{% if lang == 'en' %}Medium{% else %}Moyennes{% endif %}</div>
             <div class="stat-value">{{ sev.MEDIUM }}</div>
             <div class="stat-trend">
                 {% if trend_medium.dir == 'up' %}<span class="trend-up">↑ +{{ trend_medium.diff }}</span>
@@ -37,7 +37,7 @@
             </div>
         </div>
         <div class="stat-card low">
-            <div class="stat-label">🟢 Low</div>
+            <div class="stat-label">{% if lang == 'en' %}Low{% else %}Basses{% endif %}</div>
             <div class="stat-value">{{ sev.LOW }}</div>
             <div class="stat-trend">
                 {% if trend_low.dir == 'up' %}<span class="trend-up">↑ +{{ trend_low.diff }}</span>
@@ -51,13 +51,13 @@
     <div class="grid-2-1">
         <div class="widget">
             <div class="widget-title">
-                <span>📈 {% if lang == 'en' %}Alerts over the last 7 days{% else %}Alertes sur les 7 derniers jours{% endif %}</span>
-                <span class="refresh-badge" id="refresh-info">⟳ {% if lang == 'en' %}Auto 30s{% else %}Auto 30s{% endif %}</span>
+                <span>{% if lang == 'en' %}Alerts over the last 7 days{% else %}Alertes sur les 7 derniers jours{% endif %}</span>
+                <span class="refresh-badge" id="refresh-info">{% if lang == 'en' %}Live · 30s{% else %}En direct · 30s{% endif %}</span>
             </div>
             <canvas id="chart7days" height="90"></canvas>
         </div>
         <div class="widget">
-            <div class="widget-title" style="justify-content:center;">🛡️ {% if lang == 'en' %}Security score{% else %}Score de sécurité{% endif %}</div>
+            <div class="widget-title" style="justify-content:center;">{% if lang == 'en' %}Security score{% else %}Score de sécurité{% endif %}</div>
             <div class="score-wrap score-{{ score.level }}">
                 <div class="score-circle" id="scoreCircle" data-score="{{ score.score }}">
                     <div class="score-text">
@@ -66,9 +66,9 @@
                     </div>
                 </div>
                 <div class="score-status">
-                    {% if score.level == 'good' %}✓ {% if lang == 'en' %}Good level{% else %}Niveau bon{% endif %}
-                    {% elif score.level == 'medium' %}⚠ {% if lang == 'en' %}To monitor{% else %}À surveiller{% endif %}
-                    {% else %}✗ {% if lang == 'en' %}Critical{% else %}Critique{% endif %}{% endif %}
+                    {% if score.level == 'good' %}{% if lang == 'en' %}Good level{% else %}Niveau bon{% endif %}
+                    {% elif score.level == 'medium' %}{% if lang == 'en' %}To monitor{% else %}À surveiller{% endif %}
+                    {% else %}{% if lang == 'en' %}Critical{% else %}Critique{% endif %}{% endif %}
                 </div>
             </div>
         </div>
@@ -77,7 +77,7 @@
     <!-- Dernières alertes + catégories + services -->
     <div class="grid-2-1-1">
         <div class="widget">
-            <div class="widget-title">🔥 {% if lang == 'en' %}Latest critical alerts{% else %}Dernières alertes critiques{% endif %}</div>
+            <div class="widget-title">{% if lang == 'en' %}Latest critical alerts{% else %}Dernières alertes critiques{% endif %}</div>
             {% if recent_alerts %}
             <table class="mini-table">
                 <thead><tr>
@@ -100,7 +100,7 @@
             {% endif %}
         </div>
         <div class="widget">
-            <div class="widget-title">📊 {% if lang == 'en' %}Top categories{% else %}Top catégories{% endif %}</div>
+            <div class="widget-title">{% if lang == 'en' %}Top categories{% else %}Catégories principales{% endif %}</div>
             {% if top_categories %}
                 {% for cat in top_categories %}
                 <div class="cat-bar">
@@ -114,7 +114,7 @@
             {% endif %}
         </div>
         <div class="widget">
-            <div class="widget-title">⚙️ {% if lang == 'en' %}Services status{% else %}État des services{% endif %}</div>
+            <div class="widget-title">{% if lang == 'en' %}Services status{% else %}État des services{% endif %}</div>
             {% for s in services %}
             <div class="service-row">
                 <span><span class="service-dot {% if s.up %}up{% else %}down{% endif %}"></span>{{ s.name }}</span>
@@ -128,7 +128,7 @@
 
     <!-- Top IP attaquantes -->
     <div class="widget">
-        <div class="widget-title">🌍 {% if lang == 'en' %}Top attacking IPs{% else %}Top IPs attaquantes{% endif %}</div>
+        <div class="widget-title">{% if lang == 'en' %}Top attacking IPs{% else %}Principales IP attaquantes{% endif %}</div>
         {% if top_ips %}
         <table class="mini-table">
             <thead><tr>
@@ -155,6 +155,10 @@
 {% block scripts %}
 <script src="{% static 'js/chart.umd.js' %}"></script>
 <script>
+var css = getComputedStyle(document.documentElement);
+var cMuted = css.getPropertyValue('--text-muted').trim();
+var cBorder = css.getPropertyValue('--border').trim();
+
 // Graphique des alertes sur 7 jours
 (function () {
     var ctx = document.getElementById('chart7days');
@@ -166,16 +170,17 @@
             datasets: [{
                 label: 'Alertes',
                 data: {{ chart_data|safe }},
-                backgroundColor: 'rgba(56, 189, 248, 0.7)',
-                borderRadius: 6,
+                backgroundColor: css.getPropertyValue('--accent').trim(),
+                borderRadius: 5,
+                maxBarThickness: 34,
             }]
         },
         options: {
             responsive: true,
             plugins: { legend: { display: false } },
             scales: {
-                y: { beginAtZero: true, ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.1)' } },
-                x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                y: { beginAtZero: true, ticks: { precision: 0, color: cMuted }, grid: { color: cBorder } },
+                x: { ticks: { color: cMuted }, grid: { display: false } }
             }
         }
     });
@@ -186,7 +191,9 @@
     var el = document.getElementById('scoreCircle');
     if (!el) return;
     var score = parseInt(el.dataset.score, 10);
-    var color = score >= 80 ? '#22c55e' : (score >= 50 ? '#eab308' : '#ef4444');
+    var color = score >= 80 ? css.getPropertyValue('--success').trim()
+              : (score >= 50 ? css.getPropertyValue('--warning').trim()
+                             : css.getPropertyValue('--danger').trim());
     el.style.background = 'conic-gradient(' + color + ' 0% ' + score + '%, var(--border) ' + score + '% 100%)';
 })();
 

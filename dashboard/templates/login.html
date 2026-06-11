@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="{{ lang }}" data-theme="dark">
+<html lang="{{ lang }}" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
 <div class="auth-wrap">
     <div class="auth-card">
         <div class="brand">
-            <h1>🛡️ {{ t.app_name }}</h1>
+            <h1><span class="mark"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span> {{ t.app_name }}</h1>
         </div>
         <p class="auth-sub">{{ t.login_subtitle }}</p>
 

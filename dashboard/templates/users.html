@@ -12,7 +12,7 @@
 
     {% if new_temp_password %}
     <div class="password-reveal">
-        🔑 {{ t.temp_password_notice }}{% if new_user_email %} — <strong>{{ new_user_email }}</strong>{% endif %} :
+        {{ t.temp_password_notice }}{% if new_user_email %} — <strong>{{ new_user_email }}</strong>{% endif %} :
         <br><code>{{ new_temp_password }}</code>
         <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">
             {% if lang == 'en' %}The user will be asked to change it at first login.{% else %}L'utilisateur devra le changer à sa première connexion.{% endif %}
@@ -22,7 +22,7 @@
 
     <!-- Formulaire création -->
     <div class="modal-form">
-        <h3 style="color:var(--accent);margin-bottom:16px;">➕ {{ t.create_user }}</h3>
+        <h3 style="margin-bottom:16px;">{{ t.create_user }}</h3>
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="create">
@@ -59,7 +59,7 @@
                 <td><span class="role-pill role-{{ u.role_code }}">{{ u.role_code }}</span></td>
                 <td>
                     {% if not u.is_active %}<span class="badge-no">{{ t.user_inactive }}</span>
-                    {% elif u.is_locked %}<span style="color:var(--warning);">🔒 {{ t.user_locked }}</span>
+                    {% elif u.is_locked %}<span style="color:var(--warning);">{{ t.user_locked }}</span>
                     {% else %}<span class="badge-yes">● {{ t.user_active }}</span>{% endif %}
                 </td>
                 <td style="color:var(--text-muted);">{{ u.last_login_at|slice:"0:16"|default:"—" }}</td>

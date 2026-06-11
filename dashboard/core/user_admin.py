@@ -50,7 +50,7 @@ def create_user(email, first_name, last_name, role_id, language="fr",
             """INSERT INTO users (user_uuid, email, first_name, last_name, phone,
                password_hash, must_change_pwd, is_active, role_id, language,
                theme_preference, password_changed_at, created_at, updated_at)
-               VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s, %s, 'dark', %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s, %s, 'light', %s, %s, %s)""",
             [str(uuid.uuid4()), email, first_name, last_name, phone,
              hash_password(temp_password), role_id, language, now, now, now],
         )

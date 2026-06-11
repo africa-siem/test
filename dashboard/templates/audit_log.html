@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.audit_title }} — {{ t.app_name }}{% endblock %}
 {% block content %}
-    <div class="page-title">🕐 {{ t.audit_title }}</div>
+    <div class="page-title">{{ t.audit_title }}</div>
     <div class="page-subtitle">{{ total }} {{ t.results_total }}</div>
 
     <form method="get" class="filters-bar">

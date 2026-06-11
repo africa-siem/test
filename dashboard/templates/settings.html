@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.settings_title }} — {{ t.app_name }}{% endblock %}
 {% block content %}
-    <div class="page-title">⚙️ {{ t.settings_title }}</div>
+    <div class="page-title">{{ t.settings_title }}</div>
     <div class="page-subtitle">{% if lang == 'en' %}System configuration{% else %}Configuration du système{% endif %}</div>
 
     {% if messages %}{% for m in messages %}<div class="alert {% if m.tags == 'error' %}alert-error{% else %}alert-success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}

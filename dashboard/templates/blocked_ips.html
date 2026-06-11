@@ -6,7 +6,7 @@
 
     {% if can_unblock %}
     <div class="modal-form">
-        <h3 style="color:var(--accent);margin-bottom:14px;">🔒 {{ t.block_ip_manual }}</h3>
+        <h3 style="margin-bottom:14px;">{{ t.block_ip_manual }}</h3>
         <form method="post" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
             {% csrf_token %}
             <input type="hidden" name="action" value="block">

@@ -57,12 +57,9 @@ fi
 if ! id "${APP_USER}" &>/dev/null; then
     log "Création de l'utilisateur système ${APP_USER}..."
     useradd --system --no-create-home --shell /usr/sbin/nologin -g "${APP_USER}" "${APP_USER}"
-fi
-# IMPORTANT : le dashboard doit etre membre du groupe PARTAGE siem-africa
-# pour pouvoir lire/ecrire la base commune sans se l'approprier.
-if getent group siem-africa &>/dev/null; then
-    usermod -a -G siem-africa "${APP_USER}" 2>/dev/null || true
-    log "${APP_USER} ajoute au groupe partage siem-africa."
+else
+    log "Utilisateur ${APP_USER} déjà présent."
+    usermod -g "${APP_USER}" "${APP_USER}" 2>/dev/null || true
 fi
 
 # --- Copie de l'application --------------------------------------------------
@@ -100,10 +97,8 @@ SECRET_KEY="${SECRET_KEY}" SIEM_DB_PATH="${DB_PATH}" \
 
 # --- Permissions -------------------------------------------------------------
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${REPORTS_DIR}" "${SESSIONS_DIR}"
-# La base est PARTAGEE : on ne touche JAMAIS a son proprietaire/groupe.
-# Le dashboard y accede en etant membre du groupe partage siem-africa.
+chgrp "${APP_USER}" "${DB_PATH}" 2>/dev/null || true
 chmod g+rw "${DB_PATH}" 2>/dev/null || true
-chmod g+rw "${DB_PATH}-wal" "${DB_PATH}-shm" 2>/dev/null || true
 
 # --- Service systemd ---------------------------------------------------------
 log "Création du service systemd ${SERVICE_NAME}..."

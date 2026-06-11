@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ t.reports_title }} — {{ t.app_name }}{% endblock %}
 {% block content %}
-    <div class="page-title">📄 {{ t.reports_title }}</div>
+    <div class="page-title">{{ t.reports_title }}</div>
     <div class="page-subtitle">{% if lang == 'en' %}Security reports{% else %}Rapports de sécurité{% endif %}</div>
 
     {% if messages %}{% for m in messages %}<div class="alert {% if m.tags == 'error' %}alert-error{% else %}alert-success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
@@ -11,10 +11,10 @@
         <h3>{{ t.generate_report }}</h3>
         <div class="gen-buttons">
             <a href="?" style="display:none;"></a>
-            <a href="{% url 'report_generate' %}?format=pdf&days=7" class="btn btn-primary btn-sm" style="width:auto;">📕 {{ t.generate_pdf }} (7j)</a>
-            <a href="{% url 'report_generate' %}?format=excel&days=7" class="btn btn-secondary btn-sm">📗 {{ t.generate_excel }} (7j)</a>
-            <a href="{% url 'report_generate' %}?format=pdf&days=30" class="btn btn-secondary btn-sm">📕 PDF (30j)</a>
-            <a href="{% url 'report_generate' %}?format=excel&days=30" class="btn btn-secondary btn-sm">📗 Excel (30j)</a>
+            <a href="{% url 'report_generate' %}?format=pdf&days=7" class="btn btn-primary btn-sm" style="width:auto;">{{ t.generate_pdf }} (7j)</a>
+            <a href="{% url 'report_generate' %}?format=excel&days=7" class="btn btn-secondary btn-sm">{{ t.generate_excel }} (7j)</a>
+            <a href="{% url 'report_generate' %}?format=pdf&days=30" class="btn btn-secondary btn-sm">PDF (30j)</a>
+            <a href="{% url 'report_generate' %}?format=excel&days=30" class="btn btn-secondary btn-sm">Excel (30j)</a>
         </div>
         <p style="font-size:12px;color:var(--text-muted);">
             {% if lang == 'en' %}Reports are also generated automatically every Monday at 8 AM.{% else %}Les rapports sont aussi générés automatiquement chaque lundi à 8h.{% endif %}
@@ -35,7 +35,7 @@
                 <td><span class="report-format {{ r.real_format }}">{{ r.real_format }}</span></td>
                 <td style="color:var(--text-muted);">{% if r.file_size_bytes %}{{ r.file_size_bytes|filesizeformat }}{% else %}—{% endif %}</td>
                 <td style="color:var(--text-muted);">{{ r.created_at|slice:"0:16" }}</td>
-                <td><a href="{% url 'report_download' r.id %}" class="btn-mini">⬇ {{ t.download }}</a></td>
+                <td><a href="{% url 'report_download' r.id %}" class="btn-mini">{{ t.download }}</a></td>
             </tr>
         {% endfor %}
         </tbody>

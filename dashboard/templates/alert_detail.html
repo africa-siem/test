@@ -13,7 +13,7 @@
         <!-- Colonne principale -->
         <div>
             <div class="card">
-                <h3>📋 {{ t.alert_detail }} #{{ a.id }}</h3>
+                <h3>{{ t.alert_detail }} #{{ a.id }}</h3>
                 <p style="line-height:1.6;">{{ a.sig_desc_fr|default:a.description|default:"—" }}</p>
 
                 <div class="detail-meta">
@@ -37,7 +37,7 @@
 
             {% if a.recommendations %}
             <div class="card">
-                <h3>✅ {{ t.recommendations }}</h3>
+                <h3>{{ t.recommendations }}</h3>
                 <div class="reco-list">
                     {% for reco in a.recommendations %}
                     <div class="reco-item">
@@ -51,7 +51,7 @@
 
             {% if related %}
             <div class="card">
-                <h3>🔗 {{ t.related_alerts }}</h3>
+                <h3>{{ t.related_alerts }}</h3>
                 <table class="mini-table">
                     {% for r in related %}
                     <tr>
@@ -66,7 +66,7 @@
 
             {% if can_act %}
             <div class="card">
-                <h3>⚡ {{ t.col_actions }}</h3>
+                <h3>{{ t.col_actions }}</h3>
                 <form method="post" class="action-bar">
                     {% csrf_token %}
                     <button type="submit" name="action" value="acknowledge" class="btn-action">{{ t.action_ack }}</button>
@@ -82,7 +82,7 @@
         <div>
             {% if can_chat %}
             <div class="card" style="position:sticky;top:20px;">
-                <h3>🤖 {{ t.ai_chat_title }}</h3>
+                <h3>{{ t.ai_chat_title }}</h3>
                 <div class="chat-box">
                     <div class="chat-messages" id="chatMessages">
                         {% if chat_messages %}

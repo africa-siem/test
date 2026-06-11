@@ -8,15 +8,33 @@
     <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
 </head>
 <body>
+
+{# Jeu d'icônes (trait, héritage de la couleur du texte). Référencées par <use>. #}
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-grid" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></g></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></g></symbol>
+    <symbol id="i-bug" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></g></symbol>
+    <symbol id="i-robot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><rect x="9" y="10" width="6" height="5" rx="1"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="2" y1="11" x2="2" y2="14"/><line x1="22" y1="11" x2="22" y2="14"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></g></symbol>
+    <symbol id="i-fingerprint" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.59a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></g></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></g></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></g></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></g></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></g></symbol>
+</svg>
+
 <div class="layout">
-    <!-- SIDEBAR -->
     <aside class="sidebar">
         <div class="brand">
-            <h1>🛡️ {{ t.app_name }}</h1>
+            <h1><span class="mark"><svg viewBox="0 0 24 24" width="22" height="22"><use href="#i-shield"/></svg></span> {{ t.app_name }}</h1>
             <small>{{ t.dashboard }}</small>
         </div>
         {% if current_user.is_viewer %}
-            <div class="role-banner viewer">👔 {{ t.role_VIEWER }}</div>
+            <div class="role-banner viewer">{{ t.role_VIEWER }}</div>
         {% else %}
             <div class="role-banner">{{ current_user.role.code }}</div>
         {% endif %}
@@ -26,6 +44,7 @@
             {% for item in section.items %}
                 <a class="nav-item {% if item.url_name == active_page %}active{% endif %}"
                    href="{% url item.url_name %}">
+                    <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#i-{{ item.icon }}"/></svg></span>
                     <span>{{ item.label }}</span>
                     {% if item.badge %}<span class="badge">{{ item.badge }}</span>{% endif %}
                 </a>
@@ -33,23 +52,22 @@
         {% endfor %}
     </aside>
 
-    <!-- MAIN -->
     <div class="main">
         <div class="topbar">
-            <input type="text" class="search" placeholder="🔍 {{ t.loading }}">
+            <input type="text" class="search" placeholder="{{ t.search_placeholder }}">
             <div class="topbar-right">
                 <a class="lang-link {% if lang == 'fr' %}active{% endif %}" href="?lang=fr">FR</a>
                 <a class="lang-link {% if lang == 'en' %}active{% endif %}" href="?lang=en">EN</a>
-                <button class="icon-btn" id="theme-toggle" title="{{ t.theme }}">🌓</button>
-                <a class="icon-btn" href="#" title="Notifications">🔔</a>
+                <button class="icon-btn" id="theme-toggle" title="{{ t.theme }}"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#i-moon"/></svg></button>
+                <a class="icon-btn" href="#" title="Notifications"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#i-bell"/></svg></a>
                 <a class="user-chip" href="{% url 'profile' %}">
                     <span class="avatar {% if current_user.is_viewer %}viewer{% endif %}">{{ current_user.initials }}</span>
                     <span>
-                        <div style="font-size:13px;font-weight:700;">{{ current_user.full_name }}</div>
+                        <div style="font-size:13px;font-weight:600;">{{ current_user.full_name }}</div>
                         <div style="font-size:11px;color:var(--text-muted);">{% if current_user.role.code == 'ADMIN' %}{{ t.role_ADMIN }}{% elif current_user.role.code == 'ANALYST' %}{{ t.role_ANALYST }}{% elif current_user.role.code == 'OPERATOR' %}{{ t.role_OPERATOR }}{% else %}{{ t.role_VIEWER }}{% endif %}</div>
                     </span>
                 </a>
-                <a class="icon-btn" href="{% url 'logout' %}" title="{{ t.logout }}">⏻</a>
+                <a class="icon-btn" href="{% url 'logout' %}" title="{{ t.logout }}"><svg viewBox="0 0 24 24" width="18" height="18"><use href="#i-power"/></svg></a>
             </div>
         </div>
 
@@ -67,15 +85,18 @@
 </div>
 
 <script>
-// Bascule de thème (sombre/clair) — mémorisée localement pour l'aperçu immédiat
+// Bascule sombre/clair. On garde le choix dans localStorage pour qu'il tienne
+// d'une page à l'autre (la préférence "officielle" reste en base, via le profil).
 (function () {
     var btn = document.getElementById('theme-toggle');
     if (!btn) return;
+    var saved = localStorage.getItem('afrisiem-theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
     btn.addEventListener('click', function () {
         var html = document.documentElement;
-        var current = html.getAttribute('data-theme');
-        var next = current === 'dark' ? 'light' : 'dark';
+        var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         html.setAttribute('data-theme', next);
+        localStorage.setItem('afrisiem-theme', next);
     });
 })();
 </script>
